@@ -1,0 +1,24 @@
+{
+  "name": "@bfp/api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev src/index.ts",
+    "deploy": "wrangler deploy src/index.ts",
+    "build": "tsc",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "wrangler d1 migrations apply bfp-station-db --remote",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.43.0",
+    "hono": "^4.7.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260708.1",
+    "drizzle-kit": "^0.30.0",
+    "tsx": "^4.19.0",
+    "typescript": "~5.8.0",
+    "wrangler": "^4.15.0"
+  }
+}

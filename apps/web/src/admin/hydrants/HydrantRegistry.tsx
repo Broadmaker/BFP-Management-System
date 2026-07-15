@@ -1,0 +1,221 @@
+import { useState, useEffect } from 'react';
+import { Search, Plus, Pencil, Trash2, X, Check } from 'lucide-react';
+
+const STORAGE_KEY = 'bfp-hydrants';
+const SEED = [
+  { id: '1', hydrantId: 'HYD-001', barangay: 'Poblacion', street: 'National Highway', status: 'Operational', ownership: 'BFP', waterPressure: 60, gpsLatitude: '7.7840', gpsLongitude: '122.5863', installDate: 'Jan 15, 2020', lastInspected: 'Jun 1, 2026' },
+  { id: '2', hydrantId: 'HYD-002', barangay: 'Upper Ipil', street: 'Cueto St', status: 'Operational', ownership: 'BFP', waterPressure: 55, gpsLatitude: '7.7895', gpsLongitude: '122.5890', installDate: 'Mar 20, 2021', lastInspected: 'Jun 15, 2026' },
+  { id: '3', hydrantId: 'HYD-003', barangay: 'Ipil Heights', street: 'National Highway', status: 'Under Repair', ownership: 'Local Government', waterPressure: 0, gpsLatitude: '7.7802', gpsLongitude: '122.5835', installDate: 'Jun 10, 2019', lastInspected: 'May 20, 2026' },
+  { id: '4', hydrantId: 'HYD-004', barangay: 'Don Basilio', street: 'Gov. Cerilles St', status: 'Operational', ownership: 'BFP', waterPressure: 58, gpsLatitude: '7.7870', gpsLongitude: '122.5910', installDate: 'Nov 5, 2022', lastInspected: 'Jul 1, 2026' },
+  { id: '5', hydrantId: 'HYD-005', barangay: 'Bangkerohan', street: 'Serenity Dr', status: 'Operational', ownership: 'BFP', waterPressure: 62, gpsLatitude: '7.7815', gpsLongitude: '122.5790', installDate: 'Feb 28, 2020', lastInspected: 'Jun 20, 2026' },
+];
+
+function loadItems() {
+  try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return JSON.parse(raw); } catch {}
+  return SEED;
+}
+
+const statusColors: Record<string, string> = {
+  Operational: 'bg-green-100 text-green-700',
+  'Under Repair': 'bg-yellow-100 text-yellow-700',
+  'Out of Service': 'bg-red-100 text-red-700',
+};
+
+const statuses = ['Operational', 'Under Repair', 'Out of Service'];
+const ownerships = ['BFP', 'Local Government', 'Private'];
+
+export default function HydrantRegistry() {
+  const [items, setItems] = useState<any[]>(loadItems);
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState('All');
+  const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState<any | null>(null);
+  const [form, setForm] = useState({ hydrantId: '', barangay: '', street: '', status: 'Operational', ownership: 'BFP', waterPressure: '', gpsLatitude: '', gpsLongitude: '' });
+
+  useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); }, [items]);
+
+  function save() {
+    if (!form.hydrantId || !form.barangay) return;
+    if (editing) {
+      setItems((prev) => prev.map((i) => i.id === editing.id ? { ...i, ...form } : i));
+    } else {
+      const id = crypto.randomUUID();
+      setItems((prev) => [{ id, ...form, installDate: new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }), lastInspected: '—' }, ...prev]);
+    }
+    setShowForm(false); setEditing(null);
+    setForm({ hydrantId: '', barangay: '', street: '', status: 'Operational', ownership: 'BFP', waterPressure: '', gpsLatitude: '', gpsLongitude: '' });
+  }
+
+  function edit(item: any) {
+    setForm({ hydrantId: item.hydrantId, barangay: item.barangay, street: item.street || '', status: item.status, ownership: item.ownership || 'BFP', waterPressure: String(item.waterPressure || ''), gpsLatitude: item.gpsLatitude || '', gpsLongitude: item.gpsLongitude || '' });
+    setEditing(item); setShowForm(true);
+  }
+
+  function remove(id: string) { if (confirm('Delete this hydrant?')) setItems((prev) => prev.filter((i) => i.id !== id)); }
+
+  const filtered = items.filter((r) => {
+    if (filter !== 'All' && r.status !== filter) return false;
+    if (search) { const q = search.toLowerCase(); return r.hydrantId.toLowerCase().includes(q) || r.barangay.toLowerCase().includes(q) || r.street?.toLowerCase().includes(q); }
+    return true;
+  });
+
+  const counts: Record<string, number> = { All: items.length };
+  statuses.forEach((s) => { counts[s] = items.filter((i) => i.status === s).length; });
+
+  const operational = items.filter((i) => i.status === 'Operational').length;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-xs text-gray-500 font-medium">Fire Hydrants</div>
+          <h1 className="text-xl font-semibold text-gray-900 mt-0.5">Hydrant Registry</h1>
+          <p className="text-xs text-gray-400 mt-0.5">{items.length} hydrants · {operational} operational</p>
+        </div>
+        <button onClick={() => { setEditing(null); setForm({ hydrantId: '', barangay: '', street: '', status: 'Operational', ownership: 'BFP', waterPressure: '', gpsLatitude: '', gpsLongitude: '' }); setShowForm(true); }}
+          className="px-3 py-1.5 text-sm bg-red-600 text-white rounded-md hover:bg-red-700 flex items-center gap-1.5">
+          <Plus size={14} /> Add Hydrant
+        </button>
+      </div>
+
+      <div className="grid grid-cols-4 gap-3">
+        {Object.entries(counts).map(([k, v]) => (
+          <div key={k} className="bg-white border border-gray-200 rounded-lg p-3 cursor-pointer" onClick={() => setFilter(k)}>
+            <div className="text-xs text-gray-500">{k === 'All' ? 'Total' : k}</div>
+            <div className="text-lg font-semibold text-gray-900 mt-0.5">{v}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="bg-white border border-gray-200 rounded-lg">
+        <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-2">
+            {['All', ...statuses].map((f) => (
+              <button key={f} onClick={() => setFilter(f)}
+                className={`text-xs font-medium px-3 py-1 rounded-full ${filter === f ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>{f}</button>
+            ))}
+          </div>
+          <div className="relative">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input type="text" placeholder="Search hydrants..." value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-8 pr-3 py-1.5 text-sm border border-gray-300 rounded-md w-64 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent" />
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-200 bg-gray-50">
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-500 uppercase">Hydrant ID</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-500 uppercase">Barangay</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-500 uppercase">Street</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-500 uppercase">Status</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-500 uppercase">Pressure</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-500 uppercase">Ownership</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-500 uppercase">Last Inspected</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-500 uppercase">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((r) => (
+                <tr key={r.id} className="border-b border-gray-100 hover:bg-gray-50">
+                  <td className="px-4 py-2.5 font-mono text-xs font-semibold text-gray-900">{r.hydrantId}</td>
+                  <td className="px-4 py-2.5 text-gray-600">{r.barangay}</td>
+                  <td className="px-4 py-2.5 text-gray-600">{r.street || '—'}</td>
+                  <td className="px-4 py-2.5">
+                    <span className={`text-[11px] font-medium px-1.5 py-0.5 rounded-full ${statusColors[r.status]}`}>{r.status}</span>
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <span className={`font-medium ${Number(r.waterPressure) > 0 ? 'text-gray-900' : 'text-red-500'}`}>
+                      {r.waterPressure ? `${r.waterPressure} PSI` : '—'}
+                    </span>
+                  </td>
+                  <td className="px-4 py-2.5 text-gray-600">{r.ownership}</td>
+                  <td className="px-4 py-2.5 text-gray-600">{r.lastInspected || '—'}</td>
+                  <td className="px-4 py-2.5">
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => edit(r)} className="p-1 text-gray-400 hover:text-blue-600"><Pencil size={14} /></button>
+                      <button onClick={() => remove(r.id)} className="p-1 text-gray-400 hover:text-red-600"><Trash2 size={14} /></button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {showForm && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center" onClick={() => setShowForm(false)}>
+          <div className="bg-white rounded-xl w-full max-w-lg p-6 mx-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-base font-semibold text-gray-900">{editing ? 'Edit Hydrant' : 'Add Hydrant'}</h2>
+              <button onClick={() => setShowForm(false)} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+            </div>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Hydrant ID <span className="text-red-500">*</span></label>
+                  <input type="text" value={form.hydrantId} onChange={(e) => setForm({ ...form, hydrantId: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500" placeholder="HYD-XXX" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Barangay <span className="text-red-500">*</span></label>
+                  <input type="text" value={form.barangay} onChange={(e) => setForm({ ...form, barangay: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Street</label>
+                  <input type="text" value={form.street} onChange={(e) => setForm({ ...form, street: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Status</label>
+                  <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500">
+                    {statuses.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Ownership</label>
+                  <select value={form.ownership} onChange={(e) => setForm({ ...form, ownership: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500">
+                    {ownerships.map((o) => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Water Pressure (PSI)</label>
+                  <input type="number" value={form.waterPressure} onChange={(e) => setForm({ ...form, waterPressure: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">GPS Latitude</label>
+                  <input type="text" value={form.gpsLatitude} onChange={(e) => setForm({ ...form, gpsLatitude: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500" placeholder="7.xxxx" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">GPS Longitude</label>
+                  <input type="text" value={form.gpsLongitude} onChange={(e) => setForm({ ...form, gpsLongitude: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500" placeholder="122.xxxx" />
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-6">
+              <button onClick={() => setShowForm(false)} className="px-4 py-1.5 text-sm border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
+              <button onClick={save} disabled={!form.hydrantId || !form.barangay}
+                className="px-4 py-1.5 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 flex items-center gap-1.5">
+                <Check size={14} /> {editing ? 'Update' : 'Add'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

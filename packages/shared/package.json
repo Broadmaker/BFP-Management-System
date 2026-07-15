@@ -1,0 +1,13 @@
+{
+  "name": "@bfp/shared",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "lint": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "~5.8.0"
+  }
+}

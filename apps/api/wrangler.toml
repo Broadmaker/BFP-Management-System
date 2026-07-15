@@ -1,0 +1,8 @@
+name = "bfp-station-api"
+main = "src/index.ts"
+compatibility_date = "2026-07-15"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "bfp-station-db"
+database_id = "45daab5a-d431-4f9b-a82f-157c66b25536"
