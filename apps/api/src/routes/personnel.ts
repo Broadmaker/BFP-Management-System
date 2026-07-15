@@ -9,7 +9,20 @@ const app = new Hono<{ Bindings: { DB: D1Database; R2: R2Bucket } }>();
 
 app.get('/', async (c) => {
   const db = createDb(c.env.DB);
-  const items = await db.select().from(s.personnel).all();
+  const items = await db.select({
+    id: s.personnel.id,
+    userId: s.personnel.userId,
+    employeeNumber: s.personnel.employeeNumber,
+    rank: s.personnel.rank,
+    position: s.personnel.position,
+    assignment: s.personnel.assignment,
+    contactNumber: s.personnel.contactNumber,
+    dateHired: s.personnel.dateHired,
+    isActive: s.personnel.isActive,
+    name: s.users.name,
+  }).from(s.personnel)
+    .leftJoin(s.users, eq(s.personnel.userId, s.users.id))
+    .all();
   return c.json(items);
 });
 
