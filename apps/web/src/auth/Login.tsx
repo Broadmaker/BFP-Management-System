@@ -1,28 +1,30 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { useState } from 'react';
-import { Shield, User, Eye, EyeOff, ArrowLeft } from 'lucide-react';
-
-const demoAccounts = [
-  { label: 'Station Commander', email: 'commander@bfp.gov.ph', role: 'Station Commander', icon: Shield },
-  { label: 'Fire Officer', email: 'fire.officer@bfp.gov.ph', role: 'Fire Officer', icon: User },
-];
+import { Shield, Eye, EyeOff, ArrowLeft } from 'lucide-react';
 
 export default function Login() {
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [selected, setSelected] = useState('');
+  const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (email && password) navigate('/admin/dashboard');
+    setError('');
+    if (
+      email === import.meta.env.VITE_ADMIN_EMAIL &&
+      password === import.meta.env.VITE_ADMIN_PASSWORD
+    ) {
+      navigate('/admin/dashboard');
+    } else {
+      setError('Invalid email or password.');
+    }
   }
 
-  function selectDemo(demo: typeof demoAccounts[number]) {
-    setEmail(demo.email);
-    setPassword('demo1234');
-    setSelected(demo.label);
+  function fillAdmin() {
+    setEmail(import.meta.env.VITE_ADMIN_EMAIL || '');
+    setPassword(import.meta.env.VITE_ADMIN_PASSWORD || '');
   }
 
   return (
@@ -33,6 +35,11 @@ export default function Login() {
       </div>
 
       <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        {error && (
+          <div className="p-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg">
+            {error}
+          </div>
+        )}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Email Address</label>
           <input
@@ -82,41 +89,21 @@ export default function Login() {
         <Link to="/auth/register" className="text-red-700 hover:text-red-800 font-medium">Register here</Link>
       </div>
 
-      {/* Demo Access */}
-      <div className="border-t border-gray-100">
-        <div className="px-6 py-4">
-          <p className="text-xs text-gray-400 text-center mb-3">
-            <span className="font-medium text-gray-500">Demo Access</span> — Click a role then Sign In
-          </p>
-          <div className="grid grid-cols-2 gap-3">
-            {demoAccounts.map((demo) => {
-              const active = selected === demo.label;
-              return (
-                <button
-                  key={demo.label}
-                  type="button"
-                  onClick={() => selectDemo(demo)}
-                  className={`flex items-center gap-2.5 px-3 py-3 border rounded-lg text-left transition-all ${
-                    active
-                      ? 'border-red-600 bg-red-50 ring-1 ring-red-600'
-                      : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                  }`}
-                >
-                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                    active ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-500'
-                  }`}>
-                    <demo.icon size={16} />
-                  </div>
-                  <div>
-                    <div className={`text-xs font-medium ${active ? 'text-red-700' : 'text-gray-900'}`}>{demo.label}</div>
-                    <div className="text-[10px] text-gray-400">{demo.role}</div>
-                  </div>
-                </button>
-              );
-            })}
+      {/* Admin Quick Fill */}
+      {import.meta.env.VITE_ADMIN_EMAIL && (
+        <div className="border-t border-gray-100">
+          <div className="px-6 py-4">
+            <button
+              type="button"
+              onClick={fillAdmin}
+              className="w-full flex items-center justify-center gap-2 px-3 py-3 border border-gray-200 rounded-lg text-sm text-gray-600 hover:border-gray-300 hover:bg-gray-50 transition-all"
+            >
+              <Shield size={16} className="text-red-600" />
+              Sign in as Administrator
+            </button>
           </div>
         </div>
-      </div>
+      )}
 
       <div className="px-6 pb-5 text-center">
         <Link to="/public" className="text-xs text-gray-400 hover:text-gray-600 inline-flex items-center gap-1">
