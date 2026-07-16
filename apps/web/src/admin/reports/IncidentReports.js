@@ -1,22 +1,20 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area } from 'recharts';
 import { ArrowLeft, TrendingUp, TrendingDown, Activity, AlertTriangle } from 'lucide-react';
-const STORAGE_KEY = 'bfp-incidents';
-function loadItems() {
-    try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (raw)
-            return JSON.parse(raw);
-    }
-    catch { }
-    return [];
-}
+import { ReportsApi } from '../../lib/api';
 const COLORS = ['#dc2626', '#0ea5e9', '#eab308', '#22c55e', '#a855f7', '#f97316', '#6366f1', '#ec4899', '#14b8a6', '#78716c'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 export default function IncidentReports() {
-    const [incidents] = useState(loadItems);
+    const [incidents, setIncidents] = useState([]);
+    const [loading, setLoading] = useState(true);
+    useEffect(() => {
+        ReportsApi.incidents().then((data) => {
+            setIncidents(data || []);
+            setLoading(false);
+        }).catch(() => setLoading(false));
+    }, []);
     const total = incidents.length;
     const critical = incidents.filter((i) => i.severity === 'Critical').length;
     const closed = incidents.filter((i) => i.status === 'Closed').length;
@@ -46,6 +44,8 @@ export default function IncidentReports() {
     incidents.forEach((i) => { if (i.barangay)
         barangayMap[i.barangay] = (barangayMap[i.barangay] || 0) + 1; });
     const barangayData = Object.entries(barangayMap).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([name, value]) => ({ name: name.length > 12 ? name.slice(0, 12) + '...' : name, value }));
+    if (loading)
+        return _jsx("div", { className: "text-sm text-gray-500 p-4", children: "Loading..." });
     return (_jsxs("div", { className: "space-y-6", children: [_jsxs("div", { className: "flex items-center justify-between", children: [_jsxs("div", { children: [_jsx("div", { className: "text-xs text-gray-500 font-medium", children: "Reports & Analytics" }), _jsx("h1", { className: "text-xl font-semibold text-gray-900 mt-0.5", children: "Incident Reports" }), _jsx("p", { className: "text-xs text-gray-400 mt-0.5", children: "Comprehensive incident data analysis" })] }), _jsxs(Link, { to: "/admin/reports", className: "px-3 py-1.5 text-sm border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 flex items-center gap-1.5", children: [_jsx(ArrowLeft, { size: 14 }), " Back"] })] }), _jsx("div", { className: "grid grid-cols-4 gap-4", children: [
                     { label: 'Total Incidents', value: total, icon: Activity, color: 'bg-blue-500' },
                     { label: 'Critical', value: critical, icon: AlertTriangle, color: 'bg-red-500' },

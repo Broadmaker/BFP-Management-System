@@ -1,28 +1,28 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area } from 'recharts';
 import { ArrowLeft, Building2, CheckCircle, XCircle, Clock } from 'lucide-react';
-const STORAGE_KEYS = {
-    inspections: 'bfp-inspections',
-    establishments: 'bfp-establishments',
-    certificates: 'bfp-certificates',
-};
-function loadItems(key) {
-    try {
-        const raw = localStorage.getItem(key);
-        if (raw)
-            return JSON.parse(raw);
-    }
-    catch { }
-    return [];
-}
+import { ReportsApi, EstablishmentsApi, CertificatesApi } from '../../lib/api';
 const COLORS = ['#22c55e', '#dc2626', '#eab308', '#a855f7', '#0ea5e9', '#f97316'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 export default function InspectionReports() {
-    const [inspections] = useState(loadItems(STORAGE_KEYS.inspections));
-    const [establishments] = useState(loadItems(STORAGE_KEYS.establishments));
-    const [certificates] = useState(loadItems(STORAGE_KEYS.certificates));
+    const [inspections, setInspections] = useState([]);
+    const [establishments, setEstablishments] = useState([]);
+    const [certificates, setCertificates] = useState([]);
+    const [loading, setLoading] = useState(true);
+    useEffect(() => {
+        Promise.all([
+            ReportsApi.inspections(),
+            EstablishmentsApi.list(),
+            CertificatesApi.list(),
+        ]).then(([insp, est, cert]) => {
+            setInspections(insp || []);
+            setEstablishments(est || []);
+            setCertificates(cert || []);
+            setLoading(false);
+        }).catch(() => setLoading(false));
+    }, []);
     const total = inspections.length;
     const passed = inspections.filter((i) => i.result === 'Passed').length;
     const failed = inspections.filter((i) => i.result === 'Failed').length;
@@ -55,6 +55,8 @@ export default function InspectionReports() {
         { name: 'Expired', value: certificates.filter((c) => c.status === 'Expired').length },
         { name: 'Revoked', value: certificates.filter((c) => c.status === 'Revoked').length },
     ];
+    if (loading)
+        return _jsx("div", { className: "text-sm text-gray-500 p-4", children: "Loading..." });
     return (_jsxs("div", { className: "space-y-6", children: [_jsxs("div", { className: "flex items-center justify-between", children: [_jsxs("div", { children: [_jsx("div", { className: "text-xs text-gray-500 font-medium", children: "Reports & Analytics" }), _jsx("h1", { className: "text-xl font-semibold text-gray-900 mt-0.5", children: "Inspection Reports" }), _jsx("p", { className: "text-xs text-gray-400 mt-0.5", children: "Fire safety inspection analytics" })] }), _jsxs(Link, { to: "/admin/reports", className: "px-3 py-1.5 text-sm border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 flex items-center gap-1.5", children: [_jsx(ArrowLeft, { size: 14 }), " Back"] })] }), _jsx("div", { className: "grid grid-cols-4 gap-4", children: [
                     { label: 'Total Inspections', value: total, icon: Building2, color: 'bg-blue-500' },
                     { label: 'Passed', value: passed, icon: CheckCircle, color: 'bg-emerald-500' },

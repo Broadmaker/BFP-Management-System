@@ -28,11 +28,6 @@ export default function InspectionReports() {
     return e?.businessName || id;
   }
 
-  function estStatus(id: string) {
-    const e = establishments.find((x: any) => x.id === id);
-    return e?.complianceStatus || '';
-  }
-
   const topInspected = establishments
     .map((e: any) => ({
       name: e.businessName,

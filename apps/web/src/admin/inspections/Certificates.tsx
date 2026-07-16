@@ -13,10 +13,6 @@ function formatDate(d: string) {
   return new Date(d).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' });
 }
 
-function isExpired(dateStr: string) {
-  return new Date(dateStr) < new Date();
-}
-
 export default function Certificates() {
   const [items, setItems] = useState<any[]>([]);
   const [establishments, setEstablishments] = useState<any[]>([]);
