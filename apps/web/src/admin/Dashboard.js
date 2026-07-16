@@ -14,9 +14,9 @@ export default function Dashboard() {
     const [loading, setLoading] = useState(true);
     useEffect(() => {
         Promise.all([
-            ServiceRequestsApi.list(),
-            AppointmentsApi.list(),
-            HazardReportsApi.list(),
+            ServiceRequestsApi.list({ limit: 50 }),
+            AppointmentsApi.list({ limit: 50 }),
+            HazardReportsApi.list({ limit: 50 }),
             ReportsApi.overview(),
         ]).then(([sr, appt, haz, ov]) => {
             setServiceRequests(sr);

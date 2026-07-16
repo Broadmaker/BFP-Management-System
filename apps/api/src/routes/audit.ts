@@ -13,7 +13,8 @@ app.get('/', async (c) => {
   const userId = c.req.query('userId');
   const from = c.req.query('from');
   const to = c.req.query('to');
-  const limit = Number(c.req.query('limit') || '200');
+  const limit = Math.min(Number(c.req.query('limit') || '200'), 500);
+  const offset = Number(c.req.query('offset') || '0');
 
   const conditions = [];
   if (module) conditions.push(eq(s.auditLogs.module, module));
@@ -26,9 +27,10 @@ app.get('/', async (c) => {
     .where(conditions.length ? and(...conditions) : undefined as any)
     .orderBy(desc(s.auditLogs.createdAt))
     .limit(limit)
+    .offset(offset)
     .all();
 
-  return c.json({ items, total: items.length });
+  return c.json({ items, total: items.length, limit, offset });
 });
 
 app.get('/modules', async (c) => {

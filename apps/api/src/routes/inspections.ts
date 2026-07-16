@@ -5,11 +5,19 @@ import { eq } from 'drizzle-orm';
 
 const app = new Hono<{ Bindings: { DB: D1Database; R2: R2Bucket } }>();
 
+function page(c: any) {
+  const limit = Math.min(Number(c.req.query('limit')) || 50, 200);
+  const offset = Number(c.req.query('offset')) || 0;
+  return { limit, offset };
+}
+
 // ─── Establishments ───
 
 app.get('/establishments', async (c) => {
   const db = createDb(c.env.DB);
-  const items = await db.select().from(s.establishments).all();
+  const { limit, offset } = page(c);
+  const items = await db.select().from(s.establishments).limit(limit).offset(offset).all();
+  c.header('Cache-Control', 'public, max-age=30');
   return c.json(items);
 });
 
@@ -54,7 +62,9 @@ app.delete('/establishments/:id', async (c) => {
 
 app.get('/inspections', async (c) => {
   const db = createDb(c.env.DB);
-  const items = await db.select().from(s.inspections).all();
+  const { limit, offset } = page(c);
+  const items = await db.select().from(s.inspections).limit(limit).offset(offset).all();
+  c.header('Cache-Control', 'public, max-age=30');
   return c.json(items);
 });
 
@@ -82,7 +92,9 @@ app.delete('/inspections/:id', async (c) => {
 
 app.get('/certificates', async (c) => {
   const db = createDb(c.env.DB);
-  const items = await db.select().from(s.certificates).all();
+  const { limit, offset } = page(c);
+  const items = await db.select().from(s.certificates).limit(limit).offset(offset).all();
+  c.header('Cache-Control', 'public, max-age=30');
   return c.json(items);
 });
 
@@ -114,7 +126,9 @@ app.delete('/certificates/:id', async (c) => {
 
 app.get('/violations', async (c) => {
   const db = createDb(c.env.DB);
-  const items = await db.select().from(s.violations).all();
+  const { limit, offset } = page(c);
+  const items = await db.select().from(s.violations).limit(limit).offset(offset).all();
+  c.header('Cache-Control', 'public, max-age=30');
   return c.json(items);
 });
 

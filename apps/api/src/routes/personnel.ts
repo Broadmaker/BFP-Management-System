@@ -5,12 +5,20 @@ import { eq, sql } from 'drizzle-orm';
 
 const app = new Hono<{ Bindings: { DB: D1Database; R2: R2Bucket } }>();
 
+function page(c: any) {
+  const limit = Math.min(Number(c.req.query('limit')) || 50, 200);
+  const offset = Number(c.req.query('offset')) || 0;
+  return { limit, offset };
+}
+
 // ─── Personnel CRUD ───
 
 app.get('/', async (c) => {
   const db = createDb(c.env.DB);
+  const { limit, offset } = page(c);
   const rows = await db.select().from(s.personnel)
     .leftJoin(s.users, eq(s.personnel.userId, s.users.id))
+    .limit(limit).offset(offset)
     .all();
   const items = rows.map(({ personnel, users }) => ({
     id: personnel.id,
@@ -24,6 +32,7 @@ app.get('/', async (c) => {
     isActive: personnel.isActive,
     name: users?.name ?? null,
   }));
+  c.header('Cache-Control', 'public, max-age=30');
   return c.json(items);
 });
 
@@ -91,13 +100,11 @@ app.patch('/:id', async (c) => {
   if (body.isActive !== undefined) updates.isActive = body.isActive;
   const [item] = await db.update(s.personnel).set(updates).where(eq(s.personnel.id, id)).returning();
 
-  // also update linked user name if provided
   if (body.name && item.userId) {
     await db.update(s.users).set({ name: body.name, updatedAt: new Date().toISOString() }).where(eq(s.users.id, item.userId)).run();
     return c.json({ ...item, name: body.name });
   }
 
-  // re-fetch name from users table when name wasn't in the request
   const user = item.userId ? await db.select({ name: s.users.name }).from(s.users).where(eq(s.users.id, item.userId)).get() : null;
   return c.json({ ...item, name: user?.name ?? null });
 });
@@ -128,8 +135,7 @@ app.patch('/shifts/:id', async (c) => {
 
 app.delete('/shifts/:id', async (c) => {
   const db = createDb(c.env.DB);
-  const id = c.req.param('id');
-  await db.delete(s.shiftSchedules).where(eq(s.shiftSchedules.id, id));
+  await db.delete(s.shiftSchedules).where(eq(s.shiftSchedules.id, c.req.param('id')));
   return c.body(null, 204);
 });
 
@@ -206,25 +212,33 @@ app.delete('/training/:id', async (c) => {
 
 app.get('/shifts', async (c) => {
   const db = createDb(c.env.DB);
-  const items = await db.select().from(s.shiftSchedules).all();
+  const { limit, offset } = page(c);
+  const items = await db.select().from(s.shiftSchedules).limit(limit).offset(offset).all();
+  c.header('Cache-Control', 'public, max-age=30');
   return c.json(items);
 });
 
 app.get('/attendance', async (c) => {
   const db = createDb(c.env.DB);
-  const items = await db.select().from(s.attendance).all();
+  const { limit, offset } = page(c);
+  const items = await db.select().from(s.attendance).limit(limit).offset(offset).all();
+  c.header('Cache-Control', 'public, max-age=30');
   return c.json(items);
 });
 
 app.get('/leave', async (c) => {
   const db = createDb(c.env.DB);
-  const items = await db.select().from(s.leaveRequests).all();
+  const { limit, offset } = page(c);
+  const items = await db.select().from(s.leaveRequests).limit(limit).offset(offset).all();
+  c.header('Cache-Control', 'public, max-age=30');
   return c.json(items);
 });
 
 app.get('/training', async (c) => {
   const db = createDb(c.env.DB);
-  const items = await db.select().from(s.trainings).all();
+  const { limit, offset } = page(c);
+  const items = await db.select().from(s.trainings).limit(limit).offset(offset).all();
+  c.header('Cache-Control', 'public, max-age=30');
   return c.json(items);
 });
 
