@@ -1,18 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Search, Plus, X, Check } from 'lucide-react';
-
-const STORAGE_KEY = 'bfp-leave-requests';
-const PERSONNEL_KEY = 'bfp-personnel';
-
-function loadItems() {
-  try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return [];
-}
-
-function loadPersonnel() {
-  try { const raw = localStorage.getItem(PERSONNEL_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return [];
-}
+import { LeaveApi, PersonnelApi } from '../../lib/api';
 
 const statusColors: Record<string, string> = {
   Pending: 'bg-yellow-100 text-yellow-700',
@@ -32,29 +20,37 @@ const typeColors: Record<string, string> = {
 const statuses = ['Pending', 'Approved', 'Rejected', 'Cancelled'];
 const leaveTypes = ['Sick', 'Vacation', 'Personal', 'Training', 'Emergency'];
 
-function todayStr() {
-  return new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' });
-}
-
 export default function LeaveManagement() {
-  const [items, setItems] = useState<any[]>(loadItems);
-  const [personnel] = useState<any[]>(loadPersonnel);
+  const [items, setItems] = useState<any[]>([]);
+  const [personnel, setPersonnel] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('All');
   const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
   const [form, setForm] = useState({ personnelId: '', type: 'Sick', startDate: '', endDate: '', reason: '' });
 
-  useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); }, [items]);
+  useEffect(() => {
+    Promise.all([LeaveApi.list(), PersonnelApi.list()]).then(([r, p]) => {
+      setItems(r);
+      setPersonnel(p);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, []);
 
-  function save() {
+  function personName(personnelId: string) {
+    const p = personnel.find((x: any) => x.id === personnelId);
+    return p ? (p.name || p.employeeNumber) : 'Unknown';
+  }
+
+  async function save() {
     if (!form.personnelId || !form.startDate || !form.endDate) return;
     if (editing) {
-      setItems((prev) => prev.map((i) => i.id === editing.id ? { ...i, ...form } : i));
+      const updated = await LeaveApi.update(editing.id, form);
+      setItems((prev) => prev.map((i) => i.id === editing.id ? { ...i, ...updated } : i));
     } else {
-      const id = crypto.randomUUID();
-      const person = personnel.find((p: any) => p.id === form.personnelId);
-      setItems((prev) => [{ id, ...form, name: person?.name || 'Unknown', status: 'Pending', dateFiled: todayStr() }, ...prev]);
+      const created = await LeaveApi.create({ ...form, status: 'Pending' });
+      setItems((prev) => [created, ...prev]);
     }
     setShowForm(false); setEditing(null);
     setForm({ personnelId: '', type: 'Sick', startDate: '', endDate: '', reason: '' });
@@ -65,22 +61,31 @@ export default function LeaveManagement() {
     setEditing(item); setShowForm(true);
   }
 
-  function remove(id: string) {
-    if (confirm('Delete this leave request?')) setItems((prev) => prev.filter((i) => i.id !== id));
+  async function remove(id: string) {
+    if (confirm('Delete this leave request?')) {
+      await LeaveApi.delete(id);
+      setItems((prev) => prev.filter((i) => i.id !== id));
+    }
   }
 
-  function updateStatus(id: string, status: string) {
-    setItems((prev) => prev.map((i) => i.id === id ? { ...i, status } : i));
+  async function updateStatus(id: string, status: string) {
+    const updated = await LeaveApi.update(id, { status });
+    setItems((prev) => prev.map((i) => i.id === id ? { ...i, ...updated } : i));
   }
 
   const filtered = items.filter((r) => {
     if (filter !== 'All' && r.status !== filter) return false;
-    if (search) { const q = search.toLowerCase(); return (r.name || '').toLowerCase().includes(q) || r.type.toLowerCase().includes(q); }
+    if (search) {
+      const q = search.toLowerCase();
+      return personName(r.personnelId).toLowerCase().includes(q) || r.type.toLowerCase().includes(q);
+    }
     return true;
   });
 
   const counts: Record<string, number> = { All: items.length };
   statuses.forEach((s) => { counts[s] = items.filter((i) => i.status === s).length; });
+
+  if (loading) return <div className="text-sm text-gray-500 p-4">Loading...</div>;
 
   return (
     <div className="space-y-6">
@@ -140,14 +145,14 @@ export default function LeaveManagement() {
               {filtered.map((r) => (
                 <tr key={r.id} className="border-b border-gray-100 hover:bg-gray-50">
                   <td className="px-4 py-2.5">
-                    <div className="font-medium text-gray-900">{r.name}</div>
+                    <div className="font-medium text-gray-900">{personName(r.personnelId)}</div>
                   </td>
                   <td className="px-4 py-2.5">
                     <span className={`text-[11px] font-medium px-1.5 py-0.5 rounded-full ${typeColors[r.type]}`}>{r.type}</span>
                   </td>
                   <td className="px-4 py-2.5 text-gray-600">{r.startDate}</td>
                   <td className="px-4 py-2.5 text-gray-600">{r.endDate}</td>
-                  <td className="px-4 py-2.5 text-gray-600">{r.dateFiled || '—'}</td>
+                  <td className="px-4 py-2.5 text-gray-600">{r.createdAt ? new Date(r.createdAt).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : '—'}</td>
                   <td className="px-4 py-2.5">
                     <select value={r.status} onChange={(e) => updateStatus(r.id, e.target.value)}
                       className={`text-[11px] font-medium px-1.5 py-0.5 rounded-full border-0 ${statusColors[r.status]} cursor-pointer outline-none`}>
@@ -180,7 +185,7 @@ export default function LeaveManagement() {
                 <select value={form.personnelId} onChange={(e) => setForm({ ...form, personnelId: e.target.value })}
                   className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500">
                   <option value="">Select personnel...</option>
-                  {personnel.map((p: any) => <option key={p.id} value={p.id}>{p.name} ({p.id})</option>)}
+                  {personnel.map((p: any) => <option key={p.id} value={p.id}>{p.name || p.employeeNumber}</option>)}
                 </select>
               </div>
               <div>

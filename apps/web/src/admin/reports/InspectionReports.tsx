@@ -1,26 +1,30 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area } from 'recharts';
 import { ArrowLeft, Building2, CheckCircle, XCircle, Clock } from 'lucide-react';
-
-const STORAGE_KEYS = {
-  inspections: 'bfp-inspections',
-  establishments: 'bfp-establishments',
-  certificates: 'bfp-certificates',
-};
-
-function loadItems(key: string) {
-  try { const raw = localStorage.getItem(key); if (raw) return JSON.parse(raw); } catch {}
-  return [];
-}
+import { ReportsApi, EstablishmentsApi, CertificatesApi } from '../../lib/api';
 
 const COLORS = ['#22c55e', '#dc2626', '#eab308', '#a855f7', '#0ea5e9', '#f97316'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 export default function InspectionReports() {
-  const [inspections] = useState<any[]>(loadItems(STORAGE_KEYS.inspections));
-  const [establishments] = useState<any[]>(loadItems(STORAGE_KEYS.establishments));
-  const [certificates] = useState<any[]>(loadItems(STORAGE_KEYS.certificates));
+  const [inspections, setInspections] = useState<any[]>([]);
+  const [establishments, setEstablishments] = useState<any[]>([]);
+  const [certificates, setCertificates] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.all([
+      ReportsApi.inspections(),
+      EstablishmentsApi.list(),
+      CertificatesApi.list(),
+    ]).then(([insp, est, cert]: any[]) => {
+      setInspections(insp || []);
+      setEstablishments(est || []);
+      setCertificates(cert || []);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, []);
 
   const total = inspections.length;
   const passed = inspections.filter((i) => i.result === 'Passed').length;
@@ -54,6 +58,8 @@ export default function InspectionReports() {
     { name: 'Expired', value: certificates.filter((c) => c.status === 'Expired').length },
     { name: 'Revoked', value: certificates.filter((c) => c.status === 'Revoked').length },
   ];
+
+  if (loading) return <div className="text-sm text-gray-500 p-4">Loading...</div>;
 
   return (
     <div className="space-y-6">

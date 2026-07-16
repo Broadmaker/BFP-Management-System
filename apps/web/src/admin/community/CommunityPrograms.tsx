@@ -1,27 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Search, Plus, Users, Calendar, MapPin, Clock, Award } from 'lucide-react';
-
-const stats = [
-  { label: 'Active Seminars', value: '6', icon: Users, color: 'text-blue-600', bg: 'bg-blue-50' },
-  { label: 'Total Participants', value: '184', icon: Award, color: 'text-green-600', bg: 'bg-green-50' },
-  { label: 'Upcoming Drills', value: '3', icon: Calendar, color: 'text-purple-600', bg: 'bg-purple-50' },
-  { label: 'This Month', value: '8', icon: Clock, color: 'text-amber-600', bg: 'bg-amber-50' },
-];
-
-const programs = [
-  { id: 'PRG-001', title: 'Fire Prevention Seminar', type: 'Seminar', date: 'Aug 15, 2026', location: 'Poblacion Barangay Hall', barangay: 'Poblacion', participants: 28, slots: 45, status: 'Scheduled' as const },
-  { id: 'PRG-002', title: 'Earthquake & Fire Drill', type: 'Fire Drill', date: 'Aug 20, 2026', location: 'Don Basilio School Inc.', barangay: 'Don Basilio', participants: 0, slots: 200, status: 'Scheduled' as const },
-  { id: 'PRG-003', title: 'Home Fire Safety Workshop', type: 'Seminar', date: 'Sep 5, 2026', location: 'Ipil Heights Covered Court', barangay: 'Ipil Heights', participants: 15, slots: 50, status: 'Scheduled' as const },
-  { id: 'PRG-004', title: 'BLS Training', type: 'Seminar', date: 'Sep 12, 2026', location: 'BFP Ipil Station Training Room', barangay: 'Poblacion', participants: 30, slots: 30, status: 'Full' as const },
-  { id: 'PRG-005', title: 'Barangay Bangkerohan Outreach', type: 'Outreach', date: 'Jul 28, 2026', location: 'Bangkerohan Barangay Hall', barangay: 'Bangkerohan', participants: 52, slots: 100, status: 'Completed' as const },
-  { id: 'PRG-006', title: 'School Fire Safety Campaign', type: 'Campaign', date: 'Jul 15, 2026', location: 'Ipil Central School', barangay: 'Poblacion', participants: 340, slots: 500, status: 'Completed' as const },
-  { id: 'PRG-007', title: 'Makilas Barangay Fire Drill', type: 'Fire Drill', date: 'Oct 10, 2026', location: 'Makilas Barangay Plaza', barangay: 'Makilas', participants: 0, slots: 150, status: 'Scheduled' as const },
-  { id: 'PRG-008', title: 'Upper Ipil Fire Safety Forum', type: 'Seminar', date: 'Oct 22, 2026', location: 'Upper Ipil Barangay Hall', barangay: 'Upper Ipil', participants: 0, slots: 40, status: 'Scheduled' as const },
-];
+import { ProgramsApi, ParticipantsApi } from '../../lib/api';
 
 const statusColors: Record<string, string> = {
   Scheduled: 'bg-blue-100 text-blue-700',
-  'Full': 'bg-red-100 text-red-700',
+  Full: 'bg-red-100 text-red-700',
   Ongoing: 'bg-green-100 text-green-700',
   Completed: 'bg-gray-100 text-gray-600',
   Cancelled: 'bg-yellow-100 text-yellow-700',
@@ -35,9 +18,41 @@ const typeColors: Record<string, string> = {
 };
 
 export default function CommunityPrograms() {
+  const [programs, setPrograms] = useState<any[]>([]);
+  const [participantCounts, setParticipantCounts] = useState<Record<string, number>>({});
+  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('All');
 
+  useEffect(() => {
+    Promise.all([ProgramsApi.list(), ParticipantsApi.list()]).then(([progs, parts]) => {
+      setPrograms(progs);
+      const counts: Record<string, number> = {};
+      parts.forEach((p: any) => { counts[p.programId] = (counts[p.programId] || 0) + 1; });
+      setParticipantCounts(counts);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, []);
+
   const filtered = filter === 'All' ? programs : programs.filter((p) => p.status === filter);
+
+  const activeSeminars = programs.filter((p) => p.type === 'Seminar' && p.status === 'Scheduled').length;
+  const totalParticipants = Object.values(participantCounts).reduce((a, b) => a + b, 0);
+  const upcomingDrills = programs.filter((p) => p.type === 'Fire Drill' && p.status === 'Scheduled').length;
+  const thisMonth = programs.filter((p) => {
+    if (!p.scheduledDate) return false;
+    const d = new Date(p.scheduledDate);
+    const now = new Date();
+    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+  }).length;
+
+  const stats = [
+    { label: 'Active Seminars', value: String(activeSeminars), icon: Users, color: 'text-blue-600', bg: 'bg-blue-50' },
+    { label: 'Total Participants', value: String(totalParticipants), icon: Award, color: 'text-green-600', bg: 'bg-green-50' },
+    { label: 'Upcoming Drills', value: String(upcomingDrills), icon: Calendar, color: 'text-purple-600', bg: 'bg-purple-50' },
+    { label: 'This Month', value: String(thisMonth), icon: Clock, color: 'text-amber-600', bg: 'bg-amber-50' },
+  ];
+
+  if (loading) return <div className="text-sm text-gray-500 p-4">Loading...</div>;
 
   return (
     <div className="space-y-6">
@@ -71,15 +86,8 @@ export default function CommunityPrograms() {
         <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-2">
             {['All', 'Scheduled', 'Full', 'Completed'].map((f) => (
-              <button
-                key={f}
-                onClick={() => setFilter(f)}
-                className={`text-xs font-medium px-3 py-1 rounded-full ${
-                  filter === f ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                }`}
-              >
-                {f}
-              </button>
+              <button key={f} onClick={() => setFilter(f)}
+                className={`text-xs font-medium px-3 py-1 rounded-full ${filter === f ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>{f}</button>
             ))}
           </div>
           <div className="relative">
@@ -104,15 +112,15 @@ export default function CommunityPrograms() {
               <tr key={p.id} className="border-b border-gray-100 hover:bg-gray-50">
                 <td className="px-4 py-2.5 font-medium text-gray-900">{p.title}</td>
                 <td className="px-4 py-2.5">
-                  <span className={`text-[11px] font-medium px-1.5 py-0.5 rounded-full ${typeColors[p.type]}`}>{p.type}</span>
+                  <span className={`text-[11px] font-medium px-1.5 py-0.5 rounded-full ${typeColors[p.type] || 'bg-gray-100 text-gray-600'}`}>{p.type}</span>
                 </td>
-                <td className="px-4 py-2.5 text-gray-600">{p.date}</td>
+                <td className="px-4 py-2.5 text-gray-600">{p.scheduledDate ? new Date(p.scheduledDate).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : '—'}</td>
                 <td className="px-4 py-2.5 text-gray-600 max-w-[200px] truncate" title={p.location}>
                   <div className="flex items-center gap-1"><MapPin size={11} className="text-gray-400" />{p.location}</div>
                 </td>
-                <td className="px-4 py-2.5 text-gray-600">{p.participants}/{p.slots}</td>
+                <td className="px-4 py-2.5 text-gray-600">{participantCounts[p.id] || 0}</td>
                 <td className="px-4 py-2.5">
-                  <span className={`text-[11px] font-medium px-1.5 py-0.5 rounded-full ${statusColors[p.status]}`}>{p.status}</span>
+                  <span className={`text-[11px] font-medium px-1.5 py-0.5 rounded-full ${statusColors[p.status] || 'bg-gray-100 text-gray-600'}`}>{p.status}</span>
                 </td>
                 <td className="px-4 py-2.5">
                   <button className="text-xs text-red-600 hover:text-red-700 font-medium">Manage</button>

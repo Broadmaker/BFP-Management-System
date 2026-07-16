@@ -1,25 +1,30 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { ArrowLeft, Users, UserCheck, UserX, Clock } from 'lucide-react';
-
-const STORAGE_KEYS = {
-  personnel: 'bfp-personnel',
-  attendance: 'bfp-attendance',
-  leave: 'bfp-leave',
-};
-
-function loadItems(key: string) {
-  try { const raw = localStorage.getItem(key); if (raw) return JSON.parse(raw); } catch {}
-  return [];
-}
+import { ReportsApi, PersonnelApi, AttendanceApi, LeaveApi } from '../../lib/api';
 
 const COLORS = ['#0ea5e9', '#dc2626', '#eab308', '#22c55e', '#a855f7', '#f97316'];
 
 export default function PersonnelReports() {
-  const [personnel] = useState<any[]>(loadItems(STORAGE_KEYS.personnel));
-  const [attendance] = useState<any[]>(loadItems(STORAGE_KEYS.attendance));
-  const [leave] = useState<any[]>(loadItems(STORAGE_KEYS.leave));
+  const [personnel, setPersonnel] = useState<any[]>([]);
+  const [attendance, setAttendance] = useState<any[]>([]);
+  const [leave, setLeave] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.all([
+      ReportsApi.personnel().catch(() => []),
+      PersonnelApi.list().catch(() => []),
+      AttendanceApi.list().catch(() => []),
+      LeaveApi.list().catch(() => []),
+    ]).then(([reportsPersonnel, pers, att, lv]: any[]) => {
+      setPersonnel(reportsPersonnel.length ? reportsPersonnel : pers || []);
+      setAttendance(att || []);
+      setLeave(lv || []);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, []);
 
   const total = personnel.length;
   const active = personnel.filter((p) => p.isActive !== false).length;
@@ -45,6 +50,8 @@ export default function PersonnelReports() {
   const absentCount = attendance.filter((a) => a.type === 'Absent').length;
   const lateCount = attendance.filter((a) => a.type === 'Late').length;
   const attendanceRate = attendance.length > 0 ? Math.round((presentCount / attendance.length) * 100) : 0;
+
+  if (loading) return <div className="text-sm text-gray-500 p-4">Loading...</div>;
 
   return (
     <div className="space-y-6">

@@ -1,19 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Search, Plus, Pencil, Trash2, X, Check } from 'lucide-react';
-
-const STORAGE_KEY = 'bfp-vehicles';
-const SEED = [
-  { id: '1', name: 'Fire Engine 1', plateNumber: 'BFP-101', type: 'Fire Engine', status: 'Available', assignedCrew: 'Alpha Team', mileage: '15,230', nextMaintenance: 'Sep 15, 2026' },
-  { id: '2', name: 'Ladder Truck 1', plateNumber: 'BFP-205', type: 'Ladder Truck', status: 'Available', assignedCrew: 'Bravo Team', mileage: '8,920', nextMaintenance: 'Aug 20, 2026' },
-  { id: '3', name: 'Ambulance 1', plateNumber: 'BFP-309', type: 'Ambulance', status: 'Available', assignedCrew: 'Medical Team', mileage: '21,450', nextMaintenance: 'Oct 1, 2026' },
-  { id: '4', name: 'Rescue Unit', plateNumber: 'BFP-410', type: 'Rescue Truck', status: 'Dispatched', assignedCrew: 'Charlie Team', mileage: '12,400', nextMaintenance: 'Sep 10, 2026' },
-  { id: '5', name: 'Utility Truck', plateNumber: 'BFP-512', type: 'Utility', status: 'Available', assignedCrew: 'Support Team', mileage: '5,600', nextMaintenance: 'Oct 5, 2026' },
-];
-
-function loadItems() {
-  try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return SEED;
-}
+import { VehiclesApi } from '../../lib/api';
 
 const statusColors: Record<string, string> = {
   Available: 'bg-green-100 text-green-700',
@@ -26,22 +13,26 @@ const statuses = ['Available', 'Dispatched', 'In Maintenance', 'Out of Service']
 const vehicleTypes = ['Fire Engine', 'Ladder Truck', 'Ambulance', 'Rescue Truck', 'Utility', 'Tanker', 'Command Vehicle', 'Other'];
 
 export default function VehicleList() {
-  const [items, setItems] = useState<any[]>(loadItems);
+  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('All');
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
   const [form, setForm] = useState({ name: '', plateNumber: '', type: 'Fire Engine', status: 'Available', assignedCrew: '', nextMaintenance: '' });
 
-  useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); }, [items]);
+  useEffect(() => {
+    VehiclesApi.list().then((data) => { setItems(data); setLoading(false); }).catch(() => setLoading(false));
+  }, []);
 
-  function save() {
+  async function save() {
     if (!form.name || !form.plateNumber || !form.type) return;
     if (editing) {
-      setItems((prev) => prev.map((i) => i.id === editing.id ? { ...i, ...form } : i));
+      const updated = await VehiclesApi.update(editing.id, form);
+      setItems((prev) => prev.map((i) => i.id === editing.id ? { ...i, ...updated } : i));
     } else {
-      const id = crypto.randomUUID();
-      setItems((prev) => [{ id, ...form, mileage: '0' }, ...prev]);
+      const created = await VehiclesApi.create(form);
+      setItems((prev) => [created, ...prev]);
     }
     setShowForm(false); setEditing(null);
     setForm({ name: '', plateNumber: '', type: 'Fire Engine', status: 'Available', assignedCrew: '', nextMaintenance: '' });
@@ -52,7 +43,12 @@ export default function VehicleList() {
     setEditing(item); setShowForm(true);
   }
 
-  function remove(id: string) { if (confirm('Delete this vehicle?')) setItems((prev) => prev.filter((i) => i.id !== id)); }
+  async function remove(id: string) {
+    if (confirm('Delete this vehicle?')) {
+      await VehiclesApi.delete(id);
+      setItems((prev) => prev.filter((i) => i.id !== id));
+    }
+  }
 
   const filtered = items.filter((r) => {
     if (filter !== 'All' && r.status !== filter) return false;
@@ -62,6 +58,8 @@ export default function VehicleList() {
 
   const counts: Record<string, number> = { All: items.length };
   statuses.forEach((s) => { counts[s] = items.filter((i) => i.status === s).length; });
+
+  if (loading) return <div className="text-sm text-gray-500 p-4">Loading...</div>;
 
   return (
     <div className="space-y-6">
@@ -122,7 +120,7 @@ export default function VehicleList() {
                   <td className="px-4 py-2.5 font-mono text-xs text-gray-900 font-semibold">{r.plateNumber}</td>
                   <td className="px-4 py-2.5 text-gray-600">{r.type}</td>
                   <td className="px-4 py-2.5 text-gray-600">{r.assignedCrew || '—'}</td>
-                  <td className="px-4 py-2.5 text-gray-600">{r.mileage} km</td>
+                  <td className="px-4 py-2.5 text-gray-600">{r.mileage ? `${Number(r.mileage).toLocaleString()} km` : '—'}</td>
                   <td className="px-4 py-2.5">
                     <span className={`text-[11px] font-medium px-1.5 py-0.5 rounded-full ${statusColors[r.status]}`}>{r.status}</span>
                   </td>

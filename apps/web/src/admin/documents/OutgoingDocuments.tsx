@@ -1,17 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Search, Plus, X, Check } from 'lucide-react';
-
-const STORAGE_KEY = 'bfp-outgoing-docs';
-const SEED = [
-  { id: '1', title: 'Monthly Incident Report Submission', recipient: 'BFP Regional Office IX', date: 'Jul 14, 2026', status: 'Draft', tracking: 'OUT-2026-001' },
-  { id: '2', title: 'Equipment Requisition Request', recipient: 'Logistics Division', date: 'Jul 12, 2026', status: 'For Approval', tracking: 'OUT-2026-002' },
-  { id: '3', title: 'Training Completion Report', recipient: 'HR Division', date: 'Jul 10, 2026', status: 'Released', tracking: 'OUT-2026-003' },
-];
-
-function loadItems() {
-  try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return SEED;
-}
+import { DocumentsApi } from '../../lib/api';
 
 const statusColors: Record<string, string> = {
   Draft: 'bg-gray-100 text-gray-600',
@@ -23,25 +12,54 @@ const statusColors: Record<string, string> = {
 
 const statuses = ['Draft', 'For Approval', 'Approved', 'Released', 'Archived'];
 
+function parseMeta(doc: any) {
+  let meta: any = {};
+  try { meta = JSON.parse(doc.description || '{}'); } catch {}
+  return { ...doc, recipient: meta.recipient || '', tracking: meta.tracking || '', desc: meta.desc || '' };
+}
+
 export default function OutgoingDocuments() {
-  const [items, setItems] = useState<any[]>(loadItems);
+  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('All');
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ title: '', recipient: '', description: '' });
 
-  useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); }, [items]);
+  useEffect(() => {
+    DocumentsApi.list().then((data) => {
+      setItems(data.filter((d: any) => d.type === 'outgoing').map(parseMeta));
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, []);
 
-  function save() {
+  async function save() {
     if (!form.title || !form.recipient) return;
-    const id = crypto.randomUUID();
-    const tracking = `OUT-${String(items.length + 1).padStart(3, '0')}`;
-    setItems((prev) => [{ id, ...form, tracking, date: new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }), status: 'Draft' }, ...prev]);
-    setShowForm(false); setForm({ title: '', recipient: '', description: '' });
+    const count = items.length;
+    const tracking = `OUT-${String(count + 1).padStart(3, '0')}`;
+    const created = await DocumentsApi.create({
+      title: form.title,
+      type: 'outgoing',
+      category: 'Outgoing',
+      description: JSON.stringify({ recipient: form.recipient, tracking, desc: form.description }),
+      status: 'Draft',
+    });
+    setItems((prev) => [parseMeta(created), ...prev]);
+    setShowForm(false);
+    setForm({ title: '', recipient: '', description: '' });
   }
 
-  function updateStatus(id: string, status: string) { setItems((prev) => prev.map((i) => i.id === id ? { ...i, status } : i)); }
-  function remove(id: string) { if (confirm('Delete this document?')) setItems((prev) => prev.filter((i) => i.id !== id)); }
+  async function updateStatus(id: string, status: string) {
+    const updated = await DocumentsApi.update(id, { status });
+    setItems((prev) => prev.map((i) => i.id === id ? parseMeta({ ...i, ...updated }) : i));
+  }
+
+  async function remove(id: string) {
+    if (confirm('Delete this document?')) {
+      await DocumentsApi.delete(id);
+      setItems((prev) => prev.filter((i) => i.id !== id));
+    }
+  }
 
   const filtered = items.filter((r) => {
     if (filter !== 'All' && r.status !== filter) return false;
@@ -51,6 +69,8 @@ export default function OutgoingDocuments() {
 
   const counts: Record<string, number> = { All: items.length };
   statuses.forEach((s) => { counts[s] = items.filter((i) => i.status === s).length; });
+
+  if (loading) return <div className="text-sm text-gray-500 p-4">Loading...</div>;
 
   return (
     <div className="space-y-6">
@@ -108,7 +128,7 @@ export default function OutgoingDocuments() {
                   <td className="px-4 py-2.5 font-mono text-xs text-gray-900 font-semibold">{r.tracking}</td>
                   <td className="px-4 py-2.5 font-medium text-gray-900">{r.title}</td>
                   <td className="px-4 py-2.5 text-gray-600">{r.recipient}</td>
-                  <td className="px-4 py-2.5 text-gray-600">{r.date}</td>
+                  <td className="px-4 py-2.5 text-gray-600">{r.createdAt ? new Date(r.createdAt).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : '—'}</td>
                   <td className="px-4 py-2.5">
                     <select value={r.status} onChange={(e) => updateStatus(r.id, e.target.value)}
                       className={`text-[11px] font-medium px-1.5 py-0.5 rounded-full border-0 ${statusColors[r.status]} cursor-pointer outline-none`}>

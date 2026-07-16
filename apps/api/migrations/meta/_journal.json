@@ -8,6 +8,20 @@
       "when": 1784087155333,
       "tag": "0000_worried_victor_mancha",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1784172207514,
+      "tag": "0001_woozy_black_bolt",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1784448000000,
+      "tag": "0001_woozy_black_bolt",
+      "breakpoints": true
     }
   ]
 }

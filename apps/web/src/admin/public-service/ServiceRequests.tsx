@@ -1,27 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Search, Plus, Pencil, Trash2, X, Check } from 'lucide-react';
-
-const STORAGE_KEY = 'bfp-service-requests';
-const SEED = [
-  { id: 'SR-2026-001', type: 'FSIC Application', requester: 'Juan Dela Cruz', business: 'Sari-Sari Store', contact: '0917-123-4567', date: 'Jul 12, 2026', status: 'Pending' },
-  { id: 'SR-2026-002', type: 'FSIC Renewal', requester: 'Maria Santos', business: 'Riverside Eatery', contact: '0928-234-5678', date: 'Jul 11, 2026', status: 'Under Review' },
-  { id: 'SR-2026-003', type: 'Inspection Request', requester: 'Pedro Reyes', business: '—', contact: '0939-345-6789', date: 'Jul 10, 2026', status: 'Approved' },
-  { id: 'SR-2026-004', type: 'Document Request', requester: 'Ana Gonzales', business: '—', contact: '0940-456-7890', date: 'Jul 9, 2026', status: 'Completed' },
-  { id: 'SR-2026-005', type: 'FSIC Application', requester: 'Carlos Lim', business: 'Sibugay Hardware', contact: '0951-567-8901', date: 'Jul 8, 2026', status: 'Rejected' },
-];
-
-function loadItems() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch {}
-  return SEED;
-}
-
-function makeId() {
-  const n = Date.now().toString(36).toUpperCase();
-  return `SR-${n.slice(-5)}`;
-}
+import { ServiceRequestsApi } from '../../lib/api';
 
 const statuses = ['Pending', 'Under Review', 'Approved', 'Completed', 'Rejected'];
 const statusColors: Record<string, string> = {
@@ -31,38 +10,53 @@ const statusColors: Record<string, string> = {
 };
 
 export default function ServiceRequests() {
-  const [items, setItems] = useState<any[]>(loadItems);
+  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('All');
   const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
   const [form, setForm] = useState({ type: '', requester: '', business: '', contact: '' });
 
-  useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); }, [items]);
+  useEffect(() => {
+    ServiceRequestsApi.list().then((data) => { setItems(data); setLoading(false); }).catch(() => setLoading(false));
+  }, []);
 
-  function save() {
+  async function save() {
     if (editing) {
-      setItems((prev) => prev.map((i) => i.id === editing.id ? { ...i, ...form } : i));
+      const updated = await ServiceRequestsApi.update(editing.id, form);
+      setItems((prev) => prev.map((i) => i.id === editing.id ? { ...i, ...updated } : i));
     } else {
-      setItems((prev) => [{ id: makeId(), ...form, date: new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }), status: 'Pending' }, ...prev]);
+      const created = await ServiceRequestsApi.create(form);
+      setItems((prev) => [created, ...prev]);
     }
     setShowForm(false); setEditing(null); setForm({ type: '', requester: '', business: '', contact: '' });
   }
 
   function edit(item: any) { setForm({ type: item.type, requester: item.requester, business: item.business, contact: item.contact }); setEditing(item); setShowForm(true); }
 
-  function remove(id: string) { if (confirm('Delete this request?')) setItems((prev) => prev.filter((i) => i.id !== id)); }
+  async function remove(id: string) {
+    if (confirm('Delete this request?')) {
+      await ServiceRequestsApi.delete(id);
+      setItems((prev) => prev.filter((i) => i.id !== id));
+    }
+  }
 
-  function updateStatus(id: string, status: string) { setItems((prev) => prev.map((i) => i.id === id ? { ...i, status } : i)); }
+  async function updateStatus(id: string, status: string) {
+    const updated = await ServiceRequestsApi.update(id, { status });
+    setItems((prev) => prev.map((i) => i.id === id ? { ...i, ...updated } : i));
+  }
 
   const filtered = items.filter((r) => {
     if (filter !== 'All' && r.status !== filter) return false;
-    if (search) { const q = search.toLowerCase(); return r.requester.toLowerCase().includes(q) || r.id.toLowerCase().includes(q) || r.business.toLowerCase().includes(q); }
+    if (search) { const q = search.toLowerCase(); return r.requester.toLowerCase().includes(q) || r.id.toLowerCase().includes(q) || (r.business || '').toLowerCase().includes(q); }
     return true;
   });
 
   const counts: Record<string, number> = { All: items.length };
   statuses.forEach((s) => { counts[s] = items.filter((i) => i.status === s).length; });
+
+  if (loading) return <div className="text-sm text-gray-500 p-4">Loading...</div>;
 
   return (
     <div className="space-y-6">
@@ -113,11 +107,11 @@ export default function ServiceRequests() {
           <tbody>
             {filtered.map((r) => (
               <tr key={r.id} className="border-b border-gray-100 hover:bg-gray-50">
-                <td className="px-4 py-2.5 font-mono text-xs text-gray-900">{r.id}</td>
+                <td className="px-4 py-2.5 font-mono text-xs text-gray-900">{r.id.slice(0, 8)}</td>
                 <td className="px-4 py-2.5 text-gray-900">{r.type}</td>
                 <td className="px-4 py-2.5"><div className="font-medium text-gray-900">{r.requester}</div><div className="text-xs text-gray-400">{r.contact}</div></td>
-                <td className="px-4 py-2.5 text-gray-600">{r.business}</td>
-                <td className="px-4 py-2.5 text-gray-600">{r.date}</td>
+                <td className="px-4 py-2.5 text-gray-600">{r.business || '—'}</td>
+                <td className="px-4 py-2.5 text-gray-600">{r.date ? new Date(r.date).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : '—'}</td>
                 <td className="px-4 py-2.5">
                   <select value={r.status} onChange={(e) => updateStatus(r.id, e.target.value)} className={`text-[11px] font-medium px-1.5 py-0.5 rounded-full border-0 ${statusColors[r.status]} cursor-pointer outline-none`}>
                     {statuses.map((s) => <option key={s} value={s}>{s}</option>)}

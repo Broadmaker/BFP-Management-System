@@ -1,18 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Search, Plus, X, Check, ExternalLink, Award, Clock, AlertCircle } from 'lucide-react';
-
-const STORAGE_KEY = 'bfp-training-records';
-const PERSONNEL_KEY = 'bfp-personnel';
-
-function loadItems() {
-  try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return [];
-}
-
-function loadPersonnel() {
-  try { const raw = localStorage.getItem(PERSONNEL_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return [];
-}
+import { TrainingApi, PersonnelApi } from '../../lib/api';
 
 function isExpired(dateStr: string) {
   if (!dateStr) return false;
@@ -25,24 +13,36 @@ function formatDate(d: string) {
 }
 
 export default function TrainingRecords() {
-  const [items, setItems] = useState<any[]>(loadItems);
-  const [personnel] = useState<any[]>(loadPersonnel);
+  const [items, setItems] = useState<any[]>([]);
+  const [personnel, setPersonnel] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('All');
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
   const [form, setForm] = useState({ personnelId: '', title: '', provider: '', completedDate: '', expiryDate: '', certificateUrl: '' });
 
-  useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); }, [items]);
+  useEffect(() => {
+    Promise.all([TrainingApi.list(), PersonnelApi.list()]).then(([r, p]) => {
+      setItems(r);
+      setPersonnel(p);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, []);
 
-  function save() {
+  function personName(personnelId: string) {
+    const p = personnel.find((x: any) => x.id === personnelId);
+    return p ? (p.name || p.employeeNumber) : 'Unknown';
+  }
+
+  async function save() {
     if (!form.personnelId || !form.title) return;
     if (editing) {
-      setItems((prev) => prev.map((i) => i.id === editing.id ? { ...i, ...form } : i));
+      const updated = await TrainingApi.update(editing.id, form);
+      setItems((prev) => prev.map((i) => i.id === editing.id ? { ...i, ...updated } : i));
     } else {
-      const id = crypto.randomUUID();
-      const person = personnel.find((p: any) => p.id === form.personnelId);
-      setItems((prev) => [{ id, ...form, name: person?.name || 'Unknown' }, ...prev]);
+      const created = await TrainingApi.create(form);
+      setItems((prev) => [created, ...prev]);
     }
     setShowForm(false); setEditing(null);
     setForm({ personnelId: '', title: '', provider: '', completedDate: '', expiryDate: '', certificateUrl: '' });
@@ -56,20 +56,28 @@ export default function TrainingRecords() {
     setEditing(item); setShowForm(true);
   }
 
-  function remove(id: string) {
-    if (confirm('Delete this training record?')) setItems((prev) => prev.filter((i) => i.id !== id));
+  async function remove(id: string) {
+    if (confirm('Delete this training record?')) {
+      await TrainingApi.delete(id);
+      setItems((prev) => prev.filter((i) => i.id !== id));
+    }
   }
 
   const filtered = items.filter((r) => {
     if (filter === 'Expired' && !isExpired(r.expiryDate)) return false;
     if (filter === 'Valid' && isExpired(r.expiryDate)) return false;
-    if (search) { const q = search.toLowerCase(); return r.title.toLowerCase().includes(q) || (r.name || '').toLowerCase().includes(q); }
+    if (search) {
+      const q = search.toLowerCase();
+      return r.title.toLowerCase().includes(q) || personName(r.personnelId).toLowerCase().includes(q);
+    }
     return true;
   });
 
   const expired = items.filter((i) => isExpired(i.expiryDate)).length;
   const valid = items.filter((i) => i.expiryDate && !isExpired(i.expiryDate)).length;
   const noExpiry = items.filter((i) => !i.expiryDate).length;
+
+  if (loading) return <div className="text-sm text-gray-500 p-4">Loading...</div>;
 
   return (
     <div className="space-y-6">
@@ -162,7 +170,7 @@ export default function TrainingRecords() {
                 return (
                   <tr key={r.id} className="border-b border-gray-100 hover:bg-gray-50">
                     <td className="px-4 py-2.5">
-                      <div className="font-medium text-gray-900">{r.name}</div>
+                      <div className="font-medium text-gray-900">{personName(r.personnelId)}</div>
                     </td>
                     <td className="px-4 py-2.5 font-medium text-gray-900">{r.title}</td>
                     <td className="px-4 py-2.5 text-gray-600">{r.provider || '—'}</td>
@@ -211,7 +219,7 @@ export default function TrainingRecords() {
                 <select value={form.personnelId} onChange={(e) => setForm({ ...form, personnelId: e.target.value })}
                   className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500">
                   <option value="">Select personnel...</option>
-                  {personnel.map((p: any) => <option key={p.id} value={p.id}>{p.name} ({p.id})</option>)}
+                  {personnel.map((p: any) => <option key={p.id} value={p.id}>{p.name || p.employeeNumber}</option>)}
                 </select>
               </div>
               <div>

@@ -1,62 +1,109 @@
 import { useState, useEffect } from 'react';
 import { Users, Download, CheckCircle, Plus, Pencil, Trash2, X, Check, Search } from 'lucide-react';
-
-const STORAGE_KEY = 'bfp-seminar-registrations';
-const SEED = [
-  { id: 'REG-001', seminar: 'Fire Prevention Seminar', date: 'Aug 15, 2026', name: 'Rolando Mercado', barangay: 'Poblacion', contact: '0912-345-6789', attended: false },
-  { id: 'REG-002', seminar: 'Fire Prevention Seminar', date: 'Aug 15, 2026', name: 'Susan Villanueva', barangay: 'Ipil Heights', contact: '0923-456-7890', attended: false },
-  { id: 'REG-003', seminar: 'Earthquake & Fire Drill', date: 'Aug 20, 2026', name: 'Danny Fernandez', barangay: 'Don Basilio', contact: '0934-567-8901', attended: false },
-  { id: 'REG-004', seminar: 'BLS Training', date: 'Sep 12, 2026', name: 'Lorna Salvador', barangay: 'Bangkerohan', contact: '0945-678-9012', attended: false },
-  { id: 'REG-005', seminar: 'Home Fire Safety Workshop', date: 'Sep 5, 2026', name: 'Charisse Go', barangay: 'Sanito', contact: '0967-890-1234', attended: false },
-  { id: 'REG-006', seminar: 'Fire Prevention Seminar', date: 'Aug 15, 2026', name: 'Mark Anthony Cruz', barangay: 'Makilas', contact: '0978-901-2345', attended: false },
-  { id: 'REG-007', seminar: 'BLS Training', date: 'Sep 12, 2026', name: 'Gloria Torres', barangay: 'Poblacion', contact: '0989-012-3456', attended: false },
-  { id: 'REG-008', seminar: 'Earthquake & Fire Drill', date: 'Aug 20, 2026', name: 'Benito Reyes', barangay: 'Upper Ipil', contact: '0956-789-0123', attended: false },
-];
+import { ProgramsApi, ParticipantsApi } from '../../lib/api';
 
 const SEMINAR_NAMES = ['Fire Prevention Seminar', 'Earthquake & Fire Drill', 'BLS Training', 'Home Fire Safety Workshop'];
-
-function loadItems() {
-  try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return SEED;
-}
-
-function makeId() { return `REG-${Date.now().toString(36).toUpperCase().slice(-5)}`; }
+const BARANGAYS = ['Poblacion', 'Ipil Heights', 'Don Basilio', 'Bangkerohan', 'Upper Ipil', 'Sanito', 'Makilas', 'Lumbia'];
 
 export default function SeminarRegistrations() {
-  const [items, setItems] = useState<any[]>(loadItems);
+  const [programs, setPrograms] = useState<any[]>([]);
+  const [participants, setParticipants] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [selectedSeminar, setSelectedSeminar] = useState(SEMINAR_NAMES[0]);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
   const [form, setForm] = useState({ name: '', barangay: '', contact: '', seminar: SEMINAR_NAMES[0], date: '' });
   const [search, setSearch] = useState('');
 
-  useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); }, [items]);
+  useEffect(() => {
+    Promise.all([ProgramsApi.list(), ParticipantsApi.list()])
+      .then(([progs, parts]: any[]) => {
+        setPrograms(progs || []);
+        setParticipants(parts || []);
+        setLoading(false);
+      }).catch(() => setLoading(false));
+  }, []);
 
-  function save() {
-    const data = { ...form, attended: editing ? editing.attended : false };
-    if (editing) {
-      setItems((prev) => prev.map((i) => i.id === editing.id ? { ...i, ...data } : i));
-    } else {
-      setItems((prev) => [{ id: makeId(), ...data }, ...prev]);
-    }
-    setShowForm(false); setEditing(null);
-    setForm({ name: '', barangay: '', contact: '', seminar: SEMINAR_NAMES[0], date: '' });
+  function programLookup(seminar: string) {
+    const existing = programs.find((p) => p.title === seminar);
+    return existing;
   }
 
-  function edit(item: any) { setForm({ name: item.name, barangay: item.barangay, contact: item.contact, seminar: item.seminar, date: item.date }); setEditing(item); setShowForm(true); }
+  const enriched = participants
+    .map((p) => {
+      const prog = programs.find((pr) => pr.id === p.programId);
+      return { ...p, seminarName: prog?.title || '', seminarDate: prog?.scheduledDate || '' };
+    })
+    .filter((p) => p.seminarName === selectedSeminar);
 
-  function remove(id: string) { if (confirm('Remove this registration?')) setItems((prev) => prev.filter((i) => i.id !== id)); }
-
-  function toggleAttendance(id: string) { setItems((prev) => prev.map((i) => i.id === id ? { ...i, attended: !i.attended } : i)); }
-
-  const filtered = items.filter((r) => {
-    if (r.seminar !== selectedSeminar) return false;
-    if (search) { const q = search.toLowerCase(); return r.name.toLowerCase().includes(q) || r.barangay.toLowerCase().includes(q); }
+  const filtered = enriched.filter((r) => {
+    if (search) {
+      const q = search.toLowerCase();
+      return r.name.toLowerCase().includes(q) || (r.barangay || '').toLowerCase().includes(q);
+    }
     return true;
   });
 
   const total = filtered.length;
   const attended = filtered.filter((r) => r.attended).length;
+
+  async function save() {
+    const prog = programLookup(form.seminar);
+    let programId = prog?.id;
+    if (!programId) {
+      const created = await ProgramsApi.create({
+        title: form.seminar,
+        type: 'Seminar',
+        scheduledDate: form.date ? new Date(form.date).toISOString() : null,
+        status: 'Scheduled',
+      });
+      programId = created.id;
+      setPrograms((prev) => [...prev, created]);
+    }
+
+    const payload = {
+      programId,
+      name: form.name,
+      contactNumber: form.contact,
+      barangay: form.barangay,
+      attended: editing ? editing.attended : false,
+    };
+
+    if (editing) {
+      await ParticipantsApi.update(editing.id, payload);
+      setParticipants((prev) => prev.map((p) => p.id === editing.id ? { ...p, ...payload } : p));
+    } else {
+      const created = await ParticipantsApi.create(payload);
+      setParticipants((prev) => [created, ...prev]);
+    }
+
+    setShowForm(false);
+    setEditing(null);
+    setForm({ name: '', barangay: '', contact: '', seminar: SEMINAR_NAMES[0], date: '' });
+  }
+
+  function edit(item: any) {
+    setForm({ name: item.name, barangay: item.barangay || '', contact: item.contactNumber || '', seminar: item.seminarName, date: item.seminarDate || '' });
+    setEditing(item);
+    setShowForm(true);
+  }
+
+  async function remove(id: string) {
+    if (confirm('Remove this registration?')) {
+      await ParticipantsApi.delete(id);
+      setParticipants((prev) => prev.filter((i) => i.id !== id));
+    }
+  }
+
+  async function toggleAttendance(id: string) {
+    const p = participants.find((x) => x.id === id);
+    if (!p) return;
+    const newVal = !p.attended;
+    await ParticipantsApi.markAttended(id, newVal);
+    setParticipants((prev) => prev.map((i) => i.id === id ? { ...i, attended: newVal } : i));
+  }
+
+  if (loading) return <div className="text-sm text-gray-500 p-4">Loading...</div>;
 
   return (
     <div className="space-y-6">
@@ -64,7 +111,7 @@ export default function SeminarRegistrations() {
         <div>
           <div className="text-xs text-gray-500 font-medium">Public Service</div>
           <h1 className="text-xl font-semibold text-gray-900 mt-0.5">Seminar Registrations</h1>
-          <p className="text-xs text-gray-400 mt-0.5">{items.length} total registrations</p>
+          <p className="text-xs text-gray-400 mt-0.5">{participants.length} total registrations</p>
         </div>
         <button onClick={() => { setEditing(null); setForm({ name: '', barangay: '', contact: '', seminar: selectedSeminar, date: '' }); setShowForm(true); }} className="px-3 py-1.5 text-sm bg-red-600 text-white rounded-md hover:bg-red-700 flex items-center gap-1.5">
           <Plus size={14} /> Add Registration
@@ -107,9 +154,11 @@ export default function SeminarRegistrations() {
               <tr key={r.id} className="border-b border-gray-100 hover:bg-gray-50">
                 <td className="px-4 py-2.5 text-xs text-gray-400">{i + 1}</td>
                 <td className="px-4 py-2.5 font-medium text-gray-900">{r.name}</td>
-                <td className="px-4 py-2.5 text-gray-600">{r.barangay}</td>
-                <td className="px-4 py-2.5 text-gray-600">{r.contact}</td>
-                <td className="px-4 py-2.5 text-gray-600">{r.date}</td>
+                <td className="px-4 py-2.5 text-gray-600">{r.barangay || '—'}</td>
+                <td className="px-4 py-2.5 text-gray-600">{r.contactNumber || '—'}</td>
+                <td className="px-4 py-2.5 text-gray-600">
+                  {r.seminarDate ? new Date(r.seminarDate).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : '—'}
+                </td>
                 <td className="px-4 py-2.5">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input type="checkbox" checked={r.attended} onChange={() => toggleAttendance(r.id)} className="rounded border-gray-300 text-red-600 focus:ring-red-500" />
@@ -151,7 +200,7 @@ export default function SeminarRegistrations() {
                   <label className="block text-xs font-medium text-gray-700 mb-1">Barangay</label>
                   <select value={form.barangay} onChange={(e) => setForm({ ...form, barangay: e.target.value })} className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500">
                     <option value="">Select...</option>
-                    <option>Poblacion</option><option>Ipil Heights</option><option>Don Basilio</option><option>Bangkerohan</option><option>Upper Ipil</option><option>Sanito</option><option>Makilas</option><option>Lumbia</option>
+                    {BARANGAYS.map((b) => <option key={b}>{b}</option>)}
                   </select>
                 </div>
                 <div>
@@ -161,9 +210,9 @@ export default function SeminarRegistrations() {
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Event Date</label>
-                <input type="date" value={form.date} onChange={(e) => {
+                <input type="date" value={form.date ? new Date(form.date).toISOString().slice(0, 10) : ''} onChange={(e) => {
                   const d = new Date(e.target.value + 'T12:00:00');
-                  setForm({ ...form, date: d.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) });
+                  setForm({ ...form, date: d.toISOString() });
                 }} className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500" />
               </div>
             </div>

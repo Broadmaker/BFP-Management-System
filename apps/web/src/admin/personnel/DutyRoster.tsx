@@ -1,25 +1,9 @@
 import { useState, useEffect } from 'react';
 import { Plus, X, Check, ChevronLeft, ChevronRight, Sun, Moon, Coffee } from 'lucide-react';
-
-const STORAGE_KEY = 'bfp-duty-roster';
-const PERSONNEL_KEY = 'bfp-personnel';
-
-function loadRoster() {
-  try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return [];
-}
-
-function loadPersonnel() {
-  try { const raw = localStorage.getItem(PERSONNEL_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return [];
-}
+import { ShiftsApi, PersonnelApi } from '../../lib/api';
 
 function formatDate(d: Date) {
   return d.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' });
-}
-
-function todayStr() {
-  return new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' });
 }
 
 const shiftMeta: Record<string, { icon: any; color: string }> = {
@@ -31,13 +15,20 @@ const shiftMeta: Record<string, { icon: any; color: string }> = {
 const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 export default function DutyRoster() {
-  const [roster, setRoster] = useState<any[]>(loadRoster);
-  const [personnel] = useState<any[]>(loadPersonnel);
+  const [roster, setRoster] = useState<any[]>([]);
+  const [personnel, setPersonnel] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [weekOffset, setWeekOffset] = useState(0);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ personnelId: '', shiftType: 'Day', startTime: '08:00', endTime: '20:00', notes: '' });
 
-  useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(roster)); }, [roster]);
+  useEffect(() => {
+    Promise.all([PersonnelApi.list(), ShiftsApi.list()]).then(([p, s]) => {
+      setPersonnel(p);
+      setRoster(s);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, []);
 
   const today = new Date();
   const startOfWeek = new Date(today);
@@ -49,38 +40,46 @@ export default function DutyRoster() {
     return d;
   });
 
-  function getShift(personId: string, date: Date) {
-    const ds = formatDate(date);
-    return roster.find((s: any) => s.personnelId === personId && s.date === ds);
+  function dateISO(d: Date) {
+    return d.toISOString().split('T')[0];
   }
 
-  function save() {
+  function getShift(personId: string, date: Date) {
+    const ds = dateISO(date);
+    return roster.find((s: any) => s.personnelId === personId && s.shiftDate === ds);
+  }
+
+  async function save() {
     if (!form.personnelId || !form.shiftType) return;
-    const dateStr = formatDate(weekDates[0]);
-    setRoster((prev) => {
-      const existing = prev.findIndex((s: any) => s.personnelId === form.personnelId && s.date === dateStr);
-      const entry = { ...form, date: dateStr, id: form.personnelId + '-' + dateStr };
-      if (existing >= 0) {
-        const updated = [...prev];
-        updated[existing] = { ...updated[existing], ...entry };
-        return updated;
-      }
-      return [...prev, entry];
-    });
+    const ds = dateISO(weekDates[0]);
+    const existing = roster.find((s: any) => s.personnelId === form.personnelId && s.shiftDate === ds);
+    if (existing) {
+      const updated = await ShiftsApi.update(existing.id, form);
+      setRoster((prev) => prev.map((s) => s.id === existing.id ? { ...s, ...updated } : s));
+    } else {
+      const created = await ShiftsApi.create({ ...form, shiftDate: ds });
+      setRoster((prev) => [...prev, created]);
+    }
     setShowForm(false);
     setForm({ personnelId: '', shiftType: 'Day', startTime: '08:00', endTime: '20:00', notes: '' });
   }
 
-  function removeShift(personId: string, date: Date) {
-    const ds = formatDate(date);
-    setRoster((prev) => prev.filter((s: any) => !(s.personnelId === personId && s.date === ds)));
+  async function removeShift(personId: string, date: Date) {
+    const ds = dateISO(date);
+    const shift = roster.find((s: any) => s.personnelId === personId && s.shiftDate === ds);
+    if (shift && confirm('Remove this shift?')) {
+      await ShiftsApi.delete(shift.id);
+      setRoster((prev) => prev.filter((s) => s.id !== shift.id));
+    }
   }
 
-  const activePersonnel = personnel.filter((p: any) => p.status === 'Active');
+  const activePersonnel = personnel.filter((p: any) => p.isActive);
   const ShiftIcon = ({ type }: { type: string }) => {
     const Icon = shiftMeta[type]?.icon;
     return Icon ? <Icon size={12} /> : null;
   };
+
+  if (loading) return <div className="text-sm text-gray-500 p-4">Loading...</div>;
 
   return (
     <div className="space-y-6">
@@ -88,7 +87,7 @@ export default function DutyRoster() {
         <div>
           <div className="text-xs text-gray-500 font-medium">Personnel & Shifts</div>
           <h1 className="text-xl font-semibold text-gray-900 mt-0.5">Duty Roster</h1>
-          <p className="text-xs text-gray-400 mt-0.5">Weekly shift schedule — {todayStr()}</p>
+          <p className="text-xs text-gray-400 mt-0.5">Weekly shift schedule — {formatDate(today)}</p>
         </div>
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1 text-sm text-gray-500">
@@ -125,7 +124,7 @@ export default function DutyRoster() {
             {activePersonnel.map((p: any) => (
               <tr key={p.id} className="border-b border-gray-100 hover:bg-gray-50">
                 <td className="px-3 py-2 sticky left-0 bg-white border-r border-gray-100 z-10">
-                  <div className="font-medium text-gray-900 text-xs">{p.name}</div>
+                  <div className="font-medium text-gray-900 text-xs">{p.name || p.employeeNumber}</div>
                   <div className="text-[10px] text-gray-400">{p.position}</div>
                 </td>
                 {weekDates.map((d, i) => {
@@ -173,7 +172,7 @@ export default function DutyRoster() {
                 <select value={form.personnelId} onChange={(e) => setForm({ ...form, personnelId: e.target.value })}
                   className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500">
                   <option value="">Select personnel...</option>
-                  {activePersonnel.map((p: any) => <option key={p.id} value={p.id}>{p.name} ({p.id})</option>)}
+                  {activePersonnel.map((p: any) => <option key={p.id} value={p.id}>{p.name || p.employeeNumber}</option>)}
                 </select>
               </div>
               <div>

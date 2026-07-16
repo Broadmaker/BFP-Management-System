@@ -1,21 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Search, Plus, Pencil, Trash2, X, Check, Mail } from 'lucide-react';
-
-const STORAGE_KEY = 'bfp-users';
-const SEED = [
-  { id: 'USR-001', name: 'SUPT Juan Dela Cruz', email: 'juan.delacruz@bfp.gov.ph', role: 'Station Commander', rank: 'SUPT', position: 'Station Commander', contact: '0917-111-2222', isActive: true, lastLogin: 'Jul 15, 2026' },
-  { id: 'USR-002', name: 'SINSP Maria Santos', email: 'maria.santos@bfp.gov.ph', role: 'Fire Officer', rank: 'SINSP', position: 'Senior Fire Officer', contact: '0917-222-3333', isActive: true, lastLogin: 'Jul 14, 2026' },
-  { id: 'USR-003', name: 'FO3 Roberto Mendoza', email: 'roberto.mendoza@bfp.gov.ph', role: 'Fire Officer', rank: 'FO3', position: 'Fire Officer', contact: '0917-333-4444', isActive: true, lastLogin: 'Jul 13, 2026' },
-  { id: 'USR-004', name: 'FO1 Ana Gonzales', email: 'ana.gonzales@bfp.gov.ph', role: 'Fire Officer', rank: 'FO1', position: 'Junior Fire Officer', contact: '0917-444-5555', isActive: true, lastLogin: 'Jul 12, 2026' },
-  { id: 'USR-005', name: 'NCO Pedro Reyes', email: 'pedro.reyes@bfp.gov.ph', role: 'Fire Officer', rank: 'NCO', position: 'Non-Commissioned Officer', contact: '0917-555-6666', isActive: false, lastLogin: 'Jun 28, 2026' },
-];
-
-function loadItems() {
-  try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return SEED;
-}
-
-function makeId() { return `USR-${Date.now().toString(36).toUpperCase().slice(-5)}`; }
+import { UsersApi } from '../lib/api';
 
 const roles = ['Station Commander', 'Fire Officer', 'Public'];
 const roleColors: Record<string, string> = {
@@ -27,33 +12,50 @@ const roleColors: Record<string, string> = {
 const ranks = ['SUPT', 'SINSP', 'FO3', 'FO2', 'FO1', 'NCO'];
 
 export default function UserManagement() {
-  const [items, setItems] = useState<any[]>(loadItems);
+  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('All');
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
   const [form, setForm] = useState({ name: '', email: '', role: 'Fire Officer', rank: '', position: '', contact: '' });
 
-  useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); }, [items]);
+  useEffect(() => {
+    UsersApi.list().then((data) => { setItems(data); setLoading(false); }).catch(() => setLoading(false));
+  }, []);
 
-  function save() {
+  async function save() {
     if (!form.name || !form.email) return;
+    const data = { name: form.name, email: form.email, role: form.role, rank: form.rank || undefined, position: form.position || undefined, contactNumber: form.contact || undefined };
     if (editing) {
-      setItems((prev) => prev.map((i) => i.id === editing.id ? { ...i, ...form } : i));
+      const updated = await UsersApi.update(editing.id, data);
+      setItems((prev) => prev.map((i) => i.id === editing.id ? { ...i, ...updated } : i));
     } else {
-      setItems((prev) => [{ id: makeId(), ...form, isActive: true, lastLogin: 'Never' }, ...prev]);
+      const created = await UsersApi.create(data);
+      setItems((prev) => [created, ...prev]);
     }
     setShowForm(false); setEditing(null);
     setForm({ name: '', email: '', role: 'Fire Officer', rank: '', position: '', contact: '' });
   }
 
   function edit(item: any) {
-    setForm({ name: item.name, email: item.email, role: item.role, rank: item.rank || '', position: item.position || '', contact: item.contact || '' });
+    setForm({ name: item.name, email: item.email, role: item.role, rank: item.rank || '', position: item.position || '', contact: item.contactNumber || '' });
     setEditing(item); setShowForm(true);
   }
 
-  function remove(id: string) { if (confirm('Deactivate this user?')) setItems((prev) => prev.filter((i) => i.id !== id)); }
-  function toggleActive(id: string) { setItems((prev) => prev.map((i) => i.id === id ? { ...i, isActive: !i.isActive } : i)); }
+  async function remove(id: string) {
+    if (confirm('Deactivate this user?')) {
+      await UsersApi.delete(id);
+      setItems((prev) => prev.filter((i) => i.id !== id));
+    }
+  }
+
+  async function toggleActive(id: string) {
+    const item = items.find((i) => i.id === id);
+    if (!item) return;
+    const updated = await UsersApi.update(id, { isActive: !item.isActive });
+    setItems((prev) => prev.map((i) => i.id === id ? { ...i, ...updated } : i));
+  }
 
   const filtered = items.filter((u) => {
     if (filter === 'Active' && !u.isActive) return false;
@@ -67,6 +69,8 @@ export default function UserManagement() {
     Active: items.filter((u) => u.isActive).length,
     Inactive: items.filter((u) => !u.isActive).length,
   };
+
+  if (loading) return <div className="text-sm text-gray-500 p-4">Loading...</div>;
 
   return (
     <div className="space-y-6">
@@ -134,14 +138,14 @@ export default function UserManagement() {
                   <td className="px-4 py-3 text-sm text-gray-600">
                     {u.rank ? <><span className="font-medium">{u.rank}</span> — {u.position}</> : u.position || '—'}
                   </td>
-                  <td className="px-4 py-3 text-sm text-gray-600">{u.contact || '—'}</td>
+                  <td className="px-4 py-3 text-sm text-gray-600">{u.contactNumber || '—'}</td>
                   <td className="px-4 py-3">
                     <button onClick={() => toggleActive(u.id)}
                       className={`text-[11px] font-medium px-1.5 py-0.5 rounded-full ${u.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
                       {u.isActive ? 'Active' : 'Inactive'}
                     </button>
                   </td>
-                  <td className="px-4 py-3 text-sm text-gray-500">{u.lastLogin}</td>
+                  <td className="px-4 py-3 text-sm text-gray-500">{u.updatedAt ? new Date(u.updatedAt).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : '—'}</td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-1">
                       <button onClick={() => edit(u)} className="p-1.5 text-gray-400 hover:text-blue-600"><Pencil size={14} /></button>

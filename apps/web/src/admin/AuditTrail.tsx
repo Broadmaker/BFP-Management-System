@@ -1,33 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Search, Clock, Filter } from 'lucide-react';
+import { AuditApi, UsersApi } from '../lib/api';
 
-const STORAGE_KEY = 'bfp-audit-logs';
 const MODULES = ['Incident Management', 'Fire Safety Inspection', 'Fire Code Compliance', 'Personnel Management', 'Equipment Management', 'Fire Hydrant Management', 'Community Programs', 'Reports & Analytics', 'Document Management', 'Public Service', 'System Administration'];
 const ACTIONS = ['Create', 'Update', 'Delete', 'View', 'Approve', 'Reject', 'Login', 'Logout'];
-
-function generateSeed() {
-  const logs = [];
-  const users = ['SUPT Juan Dela Cruz', 'SINSP Maria Santos', 'FO3 Roberto Mendoza', 'FO1 Ana Gonzales', 'NCO Pedro Reyes'];
-  const start = new Date('2026-07-01');
-  for (let i = 1; i <= 50; i++) {
-    const d = new Date(start.getTime() + i * 3600000 * (Math.random() * 4 + 0.5));
-    logs.push({
-      id: `AUD-${String(i).padStart(4, '0')}`,
-      user: users[Math.floor(Math.random() * users.length)],
-      action: ACTIONS[Math.floor(Math.random() * ACTIONS.length)],
-      module: MODULES[Math.floor(Math.random() * MODULES.length)],
-      details: `Performed ${ACTIONS[Math.floor(Math.random() * ACTIONS.length)].toLowerCase()} operation on ${MODULES[Math.floor(Math.random() * MODULES.length)].toLowerCase()} record`,
-      ipAddress: `192.168.1.${Math.floor(Math.random() * 255)}`,
-      timestamp: d.toLocaleString('en-US', { month: 'short', day: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
-    });
-  }
-  return logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-}
-
-function loadItems() {
-  try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return generateSeed();
-}
 
 const actionColors: Record<string, string> = {
   Create: 'bg-green-100 text-green-700',
@@ -41,20 +17,32 @@ const actionColors: Record<string, string> = {
 };
 
 export default function AuditTrail() {
-  const [logs] = useState<any[]>(loadItems);
+  const [logs, setLogs] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterModule, setFilterModule] = useState('All');
   const [filterAction, setFilterAction] = useState('All');
+
+  useEffect(() => {
+    Promise.all([AuditApi.list(), UsersApi.list()]).then(([result, users]) => {
+      const userMap: Record<string, string> = {};
+      users.forEach((u: any) => { userMap[u.id] = u.name; });
+      setLogs((result.items || []).map((l: any) => ({ ...l, user: userMap[l.userId] || l.userId || 'Unknown' })));
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, []);
 
   const filtered = logs.filter((l) => {
     if (filterModule !== 'All' && l.module !== filterModule) return false;
     if (filterAction !== 'All' && l.action !== filterAction) return false;
     if (search) {
       const q = search.toLowerCase();
-      return l.user.toLowerCase().includes(q) || l.details.toLowerCase().includes(q) || l.module.toLowerCase().includes(q);
+      return l.user.toLowerCase().includes(q) || (l.details || '').toLowerCase().includes(q) || l.module.toLowerCase().includes(q);
     }
     return true;
   });
+
+  if (loading) return <div className="text-sm text-gray-500 p-4">Loading...</div>;
 
   return (
     <div className="space-y-6">
@@ -106,7 +94,7 @@ export default function AuditTrail() {
                   <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">
                     <div className="flex items-center gap-1.5">
                       <Clock size={12} className="text-gray-400" />
-                      {l.timestamp}
+                      {l.createdAt ? new Date(l.createdAt).toLocaleString('en-US', { month: 'short', day: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
                     </div>
                   </td>
                   <td className="px-4 py-3">
@@ -118,11 +106,11 @@ export default function AuditTrail() {
                     </div>
                   </td>
                   <td className="px-4 py-3">
-                    <span className={`text-[11px] font-medium px-1.5 py-0.5 rounded-full ${actionColors[l.action]}`}>{l.action}</span>
+                    <span className={`text-[11px] font-medium px-1.5 py-0.5 rounded-full ${actionColors[l.action] || 'bg-gray-100 text-gray-600'}`}>{l.action}</span>
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-600">{l.module}</td>
                   <td className="px-4 py-3 text-sm text-gray-500 max-w-xs truncate">{l.details}</td>
-                  <td className="px-4 py-3 text-sm text-gray-400 font-mono">{l.ipAddress}</td>
+                  <td className="px-4 py-3 text-sm text-gray-400 font-mono">{l.ipAddress || '—'}</td>
                 </tr>
               ))}
             </tbody>

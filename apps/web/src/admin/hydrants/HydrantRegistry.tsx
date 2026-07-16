@@ -1,19 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Search, Plus, Pencil, Trash2, X, Check } from 'lucide-react';
-
-const STORAGE_KEY = 'bfp-hydrants';
-const SEED = [
-  { id: '1', hydrantId: 'HYD-001', barangay: 'Poblacion', street: 'National Highway', status: 'Operational', ownership: 'BFP', waterPressure: 60, gpsLatitude: '7.7840', gpsLongitude: '122.5863', installDate: 'Jan 15, 2020', lastInspected: 'Jun 1, 2026' },
-  { id: '2', hydrantId: 'HYD-002', barangay: 'Upper Ipil', street: 'Cueto St', status: 'Operational', ownership: 'BFP', waterPressure: 55, gpsLatitude: '7.7895', gpsLongitude: '122.5890', installDate: 'Mar 20, 2021', lastInspected: 'Jun 15, 2026' },
-  { id: '3', hydrantId: 'HYD-003', barangay: 'Ipil Heights', street: 'National Highway', status: 'Under Repair', ownership: 'Local Government', waterPressure: 0, gpsLatitude: '7.7802', gpsLongitude: '122.5835', installDate: 'Jun 10, 2019', lastInspected: 'May 20, 2026' },
-  { id: '4', hydrantId: 'HYD-004', barangay: 'Don Basilio', street: 'Gov. Cerilles St', status: 'Operational', ownership: 'BFP', waterPressure: 58, gpsLatitude: '7.7870', gpsLongitude: '122.5910', installDate: 'Nov 5, 2022', lastInspected: 'Jul 1, 2026' },
-  { id: '5', hydrantId: 'HYD-005', barangay: 'Bangkerohan', street: 'Serenity Dr', status: 'Operational', ownership: 'BFP', waterPressure: 62, gpsLatitude: '7.7815', gpsLongitude: '122.5790', installDate: 'Feb 28, 2020', lastInspected: 'Jun 20, 2026' },
-];
-
-function loadItems() {
-  try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return SEED;
-}
+import { HydrantsApi } from '../../lib/api';
 
 const statusColors: Record<string, string> = {
   Operational: 'bg-green-100 text-green-700',
@@ -25,22 +12,26 @@ const statuses = ['Operational', 'Under Repair', 'Out of Service'];
 const ownerships = ['BFP', 'Local Government', 'Private'];
 
 export default function HydrantRegistry() {
-  const [items, setItems] = useState<any[]>(loadItems);
+  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('All');
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
   const [form, setForm] = useState({ hydrantId: '', barangay: '', street: '', status: 'Operational', ownership: 'BFP', waterPressure: '', gpsLatitude: '', gpsLongitude: '' });
 
-  useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); }, [items]);
+  useEffect(() => {
+    HydrantsApi.list().then((data) => { setItems(data); setLoading(false); }).catch(() => setLoading(false));
+  }, []);
 
-  function save() {
+  async function save() {
     if (!form.hydrantId || !form.barangay) return;
     if (editing) {
-      setItems((prev) => prev.map((i) => i.id === editing.id ? { ...i, ...form } : i));
+      const updated = await HydrantsApi.update(editing.id, form);
+      setItems((prev) => prev.map((i) => i.id === editing.id ? { ...i, ...updated } : i));
     } else {
-      const id = crypto.randomUUID();
-      setItems((prev) => [{ id, ...form, installDate: new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }), lastInspected: '—' }, ...prev]);
+      const created = await HydrantsApi.create(form);
+      setItems((prev) => [created, ...prev]);
     }
     setShowForm(false); setEditing(null);
     setForm({ hydrantId: '', barangay: '', street: '', status: 'Operational', ownership: 'BFP', waterPressure: '', gpsLatitude: '', gpsLongitude: '' });
@@ -51,7 +42,12 @@ export default function HydrantRegistry() {
     setEditing(item); setShowForm(true);
   }
 
-  function remove(id: string) { if (confirm('Delete this hydrant?')) setItems((prev) => prev.filter((i) => i.id !== id)); }
+  async function remove(id: string) {
+    if (confirm('Delete this hydrant?')) {
+      await HydrantsApi.delete(id);
+      setItems((prev) => prev.filter((i) => i.id !== id));
+    }
+  }
 
   const filtered = items.filter((r) => {
     if (filter !== 'All' && r.status !== filter) return false;
@@ -63,6 +59,8 @@ export default function HydrantRegistry() {
   statuses.forEach((s) => { counts[s] = items.filter((i) => i.status === s).length; });
 
   const operational = items.filter((i) => i.status === 'Operational').length;
+
+  if (loading) return <div className="text-sm text-gray-500 p-4">Loading...</div>;
 
   return (
     <div className="space-y-6">
@@ -131,7 +129,7 @@ export default function HydrantRegistry() {
                     </span>
                   </td>
                   <td className="px-4 py-2.5 text-gray-600">{r.ownership}</td>
-                  <td className="px-4 py-2.5 text-gray-600">{r.lastInspected || '—'}</td>
+                  <td className="px-4 py-2.5 text-gray-600">{r.lastInspectedDate ? new Date(r.lastInspectedDate).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : '—'}</td>
                   <td className="px-4 py-2.5">
                     <div className="flex items-center gap-1">
                       <button onClick={() => edit(r)} className="p-1 text-gray-400 hover:text-blue-600"><Pencil size={14} /></button>

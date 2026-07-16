@@ -1,18 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Search, Plus, X, Check, Shield, AlertTriangle, CheckCircle, Clock, Building2 } from 'lucide-react';
-
-const VIOLATION_KEY = 'bfp-violations';
-const ESTABLISHMENT_KEY = 'bfp-establishments';
-
-function loadViolations() {
-  try { const raw = localStorage.getItem(VIOLATION_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return [];
-}
-
-function loadEstablishments() {
-  try { const raw = localStorage.getItem(ESTABLISHMENT_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return [];
-}
+import { ComplianceApi, EstablishmentsApi } from '../../lib/api';
 
 const statusColors: Record<string, string> = {
   Open: 'bg-red-100 text-red-700',
@@ -33,45 +21,71 @@ function formatDate(d: string) {
 }
 
 export default function Compliance() {
-  const [violations, setViolations] = useState<any[]>(loadViolations);
-  const [establishments, setEstablishments] = useState<any[]>(loadEstablishments);
+  const [violations, setViolations] = useState<any[]>([]);
+  const [establishments, setEstablishments] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('All');
   const [tab, setTab] = useState<'violations' | 'establishments'>('violations');
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ establishmentId: '', description: '', complianceDeadline: '', correctiveActions: '' });
 
-  useEffect(() => { localStorage.setItem(VIOLATION_KEY, JSON.stringify(violations)); }, [violations]);
-  useEffect(() => { localStorage.setItem(ESTABLISHMENT_KEY, JSON.stringify(establishments)); }, [establishments]);
+  useEffect(() => {
+    Promise.all([ComplianceApi.list(), EstablishmentsApi.list()]).then(([v, e]) => {
+      setViolations(v);
+      setEstablishments(e);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, []);
 
-  function saveViolation() {
+  async function saveViolation() {
     if (!form.establishmentId || !form.description) return;
-    const est = establishments.find((e: any) => e.id === form.establishmentId);
-    const id = crypto.randomUUID();
-    setViolations((prev) => [{ id, ...form, establishmentName: est?.businessName || 'Unknown', status: 'Open', noticeDate: new Date().toISOString().split('T')[0] }, ...prev]);
+    const created = await ComplianceApi.create({
+      establishmentId: form.establishmentId,
+      description: form.description,
+      complianceDeadline: form.complianceDeadline || undefined,
+      correctiveActions: form.correctiveActions || undefined,
+    });
+    setViolations((prev) => [created, ...prev]);
     setShowForm(false);
     setForm({ establishmentId: '', description: '', complianceDeadline: '', correctiveActions: '' });
   }
 
-  function updateViolationStatus(id: string, status: string) {
-    setViolations((prev) => prev.map((v) => v.id === id ? { ...v, status } : v));
-    const v = violations.find((x) => x.id === id);
-    if (v) {
-      setEstablishments((prev) => prev.map((e) => e.id === v.establishmentId ? { ...e, complianceStatus: status === 'Resolved' ? 'Compliant' : 'Non-Compliant' } : e));
+  async function updateViolationStatus(id: string, status: string) {
+    const updated = await ComplianceApi.update(id, { status });
+    setViolations((prev) => prev.map((v) => v.id === id ? { ...v, ...updated } : v));
+    if (status === 'Resolved') {
+      const v = violations.find((x) => x.id === id);
+      if (v && v.establishmentId) {
+        const est = establishments.find((e) => e.id === v.establishmentId);
+        if (est && est.complianceStatus !== 'Compliant') {
+          const updatedEst = await EstablishmentsApi.update(v.establishmentId, { complianceStatus: 'Compliant' });
+          setEstablishments((prev) => prev.map((e) => e.id === v.establishmentId ? { ...e, ...updatedEst } : e));
+        }
+      }
     }
   }
 
-  function deleteViolation(id: string) {
-    if (confirm('Delete this violation?')) setViolations((prev) => prev.filter((v) => v.id !== id));
+  async function deleteViolation(id: string) {
+    if (confirm('Delete this violation?')) {
+      await ComplianceApi.delete(id);
+      setViolations((prev) => prev.filter((v) => v.id !== id));
+    }
   }
 
-  function updateEstablishmentStatus(id: string, status: string) {
-    setEstablishments((prev) => prev.map((e) => e.id === id ? { ...e, complianceStatus: status } : e));
+  async function updateEstablishmentStatus(id: string, status: string) {
+    const updated = await EstablishmentsApi.update(id, { complianceStatus: status });
+    setEstablishments((prev) => prev.map((e) => e.id === id ? { ...e, ...updated } : e));
+  }
+
+  function getEstName(v: any) {
+    const est = establishments.find((e) => e.id === v.establishmentId);
+    return est?.businessName || 'Unknown';
   }
 
   const filteredViolations = violations.filter((r) => {
     if (filter !== 'All' && r.status !== filter) return false;
-    if (search) { const q = search.toLowerCase(); return r.establishmentName?.toLowerCase().includes(q) || r.description.toLowerCase().includes(q); }
+    if (search) { const q = search.toLowerCase(); return getEstName(r).toLowerCase().includes(q) || r.description.toLowerCase().includes(q); }
     return true;
   });
 
@@ -88,6 +102,8 @@ export default function Compliance() {
   ['Compliant', 'Non-Compliant', 'Pending', 'Under Review'].forEach((s) => { eCounts[s] = establishments.filter((e: any) => e.complianceStatus === s).length; });
 
   const highRisk = establishments.filter((e: any) => e.complianceStatus === 'Non-Compliant' || e.complianceStatus === 'Pending');
+
+  if (loading) return <div className="text-sm text-gray-500 p-4">Loading...</div>;
 
   return (
     <div className="space-y-6">
@@ -197,7 +213,7 @@ export default function Compliance() {
               <tbody>
                 {filteredViolations.map((v) => (
                   <tr key={v.id} className="border-b border-gray-100 hover:bg-gray-50">
-                    <td className="px-4 py-2.5 font-medium text-gray-900">{v.establishmentName}</td>
+                    <td className="px-4 py-2.5 font-medium text-gray-900">{getEstName(v)}</td>
                     <td className="px-4 py-2.5 text-gray-600 max-w-[200px] truncate">{v.description}</td>
                     <td className="px-4 py-2.5 text-gray-600">{formatDate(v.noticeDate)}</td>
                     <td className="px-4 py-2.5 text-gray-600">{formatDate(v.complianceDeadline)}</td>

@@ -1,22 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Search, Plus, X, Check } from 'lucide-react';
-
-const STORAGE_KEY = 'bfp-attendance';
-const PERSONNEL_KEY = 'bfp-personnel';
-
-function loadRecords() {
-  try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return [];
-}
-
-function loadPersonnel() {
-  try { const raw = localStorage.getItem(PERSONNEL_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return [];
-}
-
-function todayStr() {
-  return new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' });
-}
+import { AttendanceApi, PersonnelApi } from '../../lib/api';
 
 function todayISO() {
   return new Date().toISOString().split('T')[0];
@@ -33,24 +17,36 @@ const typeColors: Record<string, string> = {
 const types = ['Present', 'Absent', 'Late', 'On Leave', 'Official Business'];
 
 export default function Attendance() {
-  const [records, setRecords] = useState<any[]>(loadRecords);
-  const [personnel] = useState<any[]>(loadPersonnel);
+  const [records, setRecords] = useState<any[]>([]);
+  const [personnel, setPersonnel] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('All');
   const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
   const [form, setForm] = useState({ personnelId: '', date: todayISO(), type: 'Present', timeIn: '', timeOut: '', remarks: '' });
 
-  useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(records)); }, [records]);
+  useEffect(() => {
+    Promise.all([AttendanceApi.list(), PersonnelApi.list()]).then(([r, p]) => {
+      setRecords(r);
+      setPersonnel(p);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, []);
 
-  function save() {
+  function personName(personnelId: string) {
+    const p = personnel.find((x: any) => x.id === personnelId);
+    return p ? (p.name || p.employeeNumber) : 'Unknown';
+  }
+
+  async function save() {
     if (!form.personnelId || !form.date || !form.type) return;
     if (editing) {
-      setRecords((prev) => prev.map((r) => r.id === editing.id ? { ...r, ...form } : r));
+      const updated = await AttendanceApi.update(editing.id, form);
+      setRecords((prev) => prev.map((r) => r.id === editing.id ? { ...r, ...updated } : r));
     } else {
-      const id = crypto.randomUUID();
-      const person = personnel.find((p: any) => p.id === form.personnelId);
-      setRecords((prev) => [{ id, ...form, name: person?.name || 'Unknown' }, ...prev]);
+      const created = await AttendanceApi.create(form);
+      setRecords((prev) => [created, ...prev]);
     }
     setShowForm(false); setEditing(null);
     setForm({ personnelId: '', date: todayISO(), type: 'Present', timeIn: '', timeOut: '', remarks: '' });
@@ -61,18 +57,23 @@ export default function Attendance() {
     setEditing(r); setShowForm(true);
   }
 
-  function remove(id: string) {
-    if (confirm('Delete this attendance record?')) setRecords((prev) => prev.filter((r) => r.id !== id));
+  async function remove(id: string) {
+    if (confirm('Delete this attendance record?')) {
+      await AttendanceApi.delete(id);
+      setRecords((prev) => prev.filter((r) => r.id !== id));
+    }
   }
 
   const filtered = records.filter((r) => {
     if (filter !== 'All' && r.type !== filter) return false;
-    if (search) { const q = search.toLowerCase(); return (r.name || '').toLowerCase().includes(q); }
+    if (search) { const q = search.toLowerCase(); return personName(r.personnelId).toLowerCase().includes(q); }
     return true;
   });
 
   const counts: Record<string, number> = { All: records.length };
   types.forEach((t) => { counts[t] = records.filter((r) => r.type === t).length; });
+
+  if (loading) return <div className="text-sm text-gray-500 p-4">Loading...</div>;
 
   return (
     <div className="space-y-6">
@@ -80,7 +81,7 @@ export default function Attendance() {
         <div>
           <div className="text-xs text-gray-500 font-medium">Personnel & Shifts</div>
           <h1 className="text-xl font-semibold text-gray-900 mt-0.5">Attendance</h1>
-          <p className="text-xs text-gray-400 mt-0.5">{todayStr()} — {records.length} records</p>
+          <p className="text-xs text-gray-400 mt-0.5">{todayISO()} — {records.length} records</p>
         </div>
         <button onClick={() => { setEditing(null); setForm({ personnelId: '', date: todayISO(), type: 'Present', timeIn: '', timeOut: '', remarks: '' }); setShowForm(true); }}
           className="px-3 py-1.5 text-sm bg-red-600 text-white rounded-md hover:bg-red-700 flex items-center gap-1.5">
@@ -132,7 +133,7 @@ export default function Attendance() {
               {filtered.map((r) => (
                 <tr key={r.id} className="border-b border-gray-100 hover:bg-gray-50">
                   <td className="px-4 py-2.5">
-                    <div className="font-medium text-gray-900">{r.name}</div>
+                    <div className="font-medium text-gray-900">{personName(r.personnelId)}</div>
                   </td>
                   <td className="px-4 py-2.5 text-gray-600">{r.date}</td>
                   <td className="px-4 py-2.5">
@@ -167,7 +168,7 @@ export default function Attendance() {
                 <select value={form.personnelId} onChange={(e) => setForm({ ...form, personnelId: e.target.value })}
                   className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500">
                   <option value="">Select personnel...</option>
-                  {personnel.map((p: any) => <option key={p.id} value={p.id}>{p.name} ({p.id})</option>)}
+                  {personnel.map((p: any) => <option key={p.id} value={p.id}>{p.name || p.employeeNumber}</option>)}
                 </select>
               </div>
               <div>

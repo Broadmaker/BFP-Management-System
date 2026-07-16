@@ -60,6 +60,17 @@ app.post('/participants', async (c) => {
   return c.json(item, 201);
 });
 
+app.patch('/participants/:id', async (c) => {
+  const db = createDb(c.env.DB);
+  const body = await c.req.json();
+  const updates: Record<string, any> = {};
+  for (const key of ['name', 'contactNumber', 'email', 'barangay', 'programId', 'attended']) {
+    if (body[key] !== undefined) updates[key] = body[key];
+  }
+  const [item] = await db.update(s.programParticipants).set(updates).where(eq(s.programParticipants.id, c.req.param('id'))).returning();
+  return c.json(item);
+});
+
 app.patch('/participants/:id/attended', async (c) => {
   const db = createDb(c.env.DB);
   const { attended } = await c.req.json();

@@ -1,17 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Search, Plus, Pencil, Trash2, X, Check, FileText } from 'lucide-react';
-
-const STORAGE_KEY = 'bfp-documents';
-const SEED = [
-  { id: '1', title: 'Monthly Incident Report - June 2026', type: 'report', category: 'Monthly Reports', description: 'Summary of all incidents for June 2026', status: 'Approved', version: 1, date: 'Jul 1, 2026' },
-  { id: '2', title: 'Fire Safety Inspection Guidelines 2026', type: 'memorandum', category: 'Memoranda', description: 'Updated inspection protocols and checklists', status: 'Released', version: 2, date: 'Jun 28, 2026' },
-  { id: '3', title: 'Station Maintenance Schedule Q3 2026', type: 'circular', category: 'Circulars', description: 'Equipment and vehicle maintenance schedule', status: 'Draft', version: 1, date: 'Jul 5, 2026' },
-];
-
-function loadItems() {
-  try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return SEED;
-}
+import { DocumentsApi } from '../../lib/api';
 
 const statusColors: Record<string, string> = {
   Draft: 'bg-gray-100 text-gray-600',
@@ -25,7 +14,8 @@ const statuses = ['Draft', 'Pending Approval', 'Approved', 'Released', 'Archived
 const categories = ['Monthly Reports', 'Memoranda', 'Circulars', 'Certificates', 'Reports', 'Others'];
 
 export default function DocumentRepository() {
-  const [items, setItems] = useState<any[]>(loadItems);
+  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('All');
   const [catFilter, setCatFilter] = useState('All');
@@ -33,15 +23,18 @@ export default function DocumentRepository() {
   const [editing, setEditing] = useState<any | null>(null);
   const [form, setForm] = useState({ title: '', type: 'report', category: '', description: '', fileUrl: '' });
 
-  useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); }, [items]);
+  useEffect(() => {
+    DocumentsApi.list().then((data) => { setItems(data); setLoading(false); }).catch(() => setLoading(false));
+  }, []);
 
-  function save() {
+  async function save() {
     if (!form.title || !form.category) return;
     if (editing) {
-      setItems((prev) => prev.map((i) => i.id === editing.id ? { ...i, ...form } : i));
+      const updated = await DocumentsApi.update(editing.id, form);
+      setItems((prev) => prev.map((i) => i.id === editing.id ? { ...i, ...updated } : i));
     } else {
-      const id = crypto.randomUUID();
-      setItems((prev) => [{ id, ...form, status: 'Draft', version: 1, date: new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) }, ...prev]);
+      const created = await DocumentsApi.create(form);
+      setItems((prev) => [created, ...prev]);
     }
     setShowForm(false); setEditing(null);
     setForm({ title: '', type: 'report', category: '', description: '', fileUrl: '' });
@@ -52,9 +45,19 @@ export default function DocumentRepository() {
     setEditing(item); setShowForm(true);
   }
 
-  function remove(id: string) { if (confirm('Delete this document?')) setItems((prev) => prev.filter((i) => i.id !== id)); }
+  async function remove(id: string) {
+    if (confirm('Delete this document?')) {
+      await DocumentsApi.delete(id);
+      setItems((prev) => prev.filter((i) => i.id !== id));
+    }
+  }
 
-  function updateStatus(id: string, status: string) { setItems((prev) => prev.map((i) => i.id === id ? { ...i, status, version: status === 'Released' ? i.version + 1 : i.version } : i)); }
+  async function updateStatus(id: string, status: string) {
+    const patch: any = { status };
+    if (status === 'Released') patch.version = undefined;
+    const updated = await DocumentsApi.update(id, patch);
+    setItems((prev) => prev.map((i) => i.id === id ? { ...i, ...updated } : i));
+  }
 
   const filtered = items.filter((r) => {
     if (filter !== 'All' && r.status !== filter) return false;
@@ -65,6 +68,8 @@ export default function DocumentRepository() {
 
   const counts: Record<string, number> = { All: items.length };
   statuses.forEach((s) => { counts[s] = items.filter((i) => i.status === s).length; });
+
+  if (loading) return <div className="text-sm text-gray-500 p-4">Loading...</div>;
 
   return (
     <div className="space-y-6">
@@ -134,7 +139,7 @@ export default function DocumentRepository() {
                     </div>
                   </td>
                   <td className="px-4 py-2.5"><span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">{r.category}</span></td>
-                  <td className="px-4 py-2.5 text-gray-600">{r.date}</td>
+                  <td className="px-4 py-2.5 text-gray-600">{r.createdAt ? new Date(r.createdAt).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : '—'}</td>
                   <td className="px-4 py-2.5 text-gray-600">v{r.version}</td>
                   <td className="px-4 py-2.5">
                     <select value={r.status} onChange={(e) => updateStatus(r.id, e.target.value)}

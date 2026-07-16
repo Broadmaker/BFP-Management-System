@@ -1,12 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Search, MapPin, Droplets, Circle } from 'lucide-react';
-
-const HYDRANT_KEY = 'bfp-hydrants';
-
-function loadHydrants() {
-  try { const raw = localStorage.getItem(HYDRANT_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return [];
-}
+import { HydrantsApi } from '../../lib/api';
 
 const statusColors: Record<string, string> = {
   Operational: 'text-green-600 bg-green-100 border-green-300',
@@ -15,9 +9,14 @@ const statusColors: Record<string, string> = {
 };
 
 export default function GISMap() {
-  const [hydrants] = useState<any[]>(loadHydrants);
+  const [hydrants, setHydrants] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<any | null>(null);
   const [search, setSearch] = useState('');
+
+  useEffect(() => {
+    HydrantsApi.list().then((data) => { setHydrants(data); setLoading(false); }).catch(() => setLoading(false));
+  }, []);
 
   const filtered = hydrants.filter((h) => {
     if (!search) return true;
@@ -26,6 +25,8 @@ export default function GISMap() {
   });
 
   const operational = hydrants.filter((h) => h.status === 'Operational').length;
+
+  if (loading) return <div className="text-sm text-gray-500 p-4">Loading...</div>;
 
   return (
     <div className="space-y-6">
@@ -130,7 +131,7 @@ export default function GISMap() {
                 <div className="flex justify-between"><span className="text-gray-500">Pressure</span><span className="text-gray-900 font-medium">{selected.waterPressure ? `${selected.waterPressure} PSI` : '—'}</span></div>
                 <div className="flex justify-between"><span className="text-gray-500">Ownership</span><span className="text-gray-900">{selected.ownership}</span></div>
                 <div className="flex justify-between"><span className="text-gray-500">GPS</span><span className="text-gray-900 font-mono text-[10px]">{selected.gpsLatitude}, {selected.gpsLongitude}</span></div>
-                <div className="flex justify-between"><span className="text-gray-500">Last Inspected</span><span className="text-gray-900">{selected.lastInspected || '—'}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">Last Inspected</span><span className="text-gray-900">{selected.lastInspectedDate ? new Date(selected.lastInspectedDate).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : '—'}</span></div>
               </div>
             </div>
           )}

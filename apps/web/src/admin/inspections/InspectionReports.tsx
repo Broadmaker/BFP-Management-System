@@ -1,22 +1,17 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { BarChart3, Download } from 'lucide-react';
-
-const INSPECTION_KEY = 'bfp-inspection-schedule';
-const ESTABLISHMENT_KEY = 'bfp-establishments';
-
-function loadInspections() {
-  try { const raw = localStorage.getItem(INSPECTION_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return [];
-}
-
-function loadEstablishments() {
-  try { const raw = localStorage.getItem(ESTABLISHMENT_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return [];
-}
+import { InspectionsApi, EstablishmentsApi } from '../../lib/api';
 
 export default function InspectionReports() {
-  const [inspections] = useState<any[]>(loadInspections);
-  const [establishments] = useState<any[]>(loadEstablishments);
+  const [inspections, setInspections] = useState<any[]>([]);
+  const [establishments, setEstablishments] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.all([InspectionsApi.list(), EstablishmentsApi.list()])
+      .then(([i, e]) => { setInspections(i); setEstablishments(e); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
 
   const total = inspections.length;
   const passed = inspections.filter((i) => i.result === 'Passed').length;
@@ -28,6 +23,16 @@ export default function InspectionReports() {
   const resultCounts: Record<string, number> = {};
   inspections.forEach((i) => { resultCounts[i.result] = (resultCounts[i.result] || 0) + 1; });
 
+  function estName(id: string) {
+    const e = establishments.find((x: any) => x.id === id);
+    return e?.businessName || id;
+  }
+
+  function estStatus(id: string) {
+    const e = establishments.find((x: any) => x.id === id);
+    return e?.complianceStatus || '';
+  }
+
   const topInspected = establishments
     .map((e: any) => ({
       name: e.businessName,
@@ -36,6 +41,8 @@ export default function InspectionReports() {
     }))
     .sort((a: any, b: any) => b.count - a.count)
     .slice(0, 5);
+
+  if (loading) return <div className="text-sm text-gray-500 p-4">Loading...</div>;
 
   return (
     <div className="space-y-6">
@@ -139,7 +146,7 @@ export default function InspectionReports() {
             <tbody>
               {inspections.slice(0, 10).map((r) => (
                 <tr key={r.id} className="border-b border-gray-100 hover:bg-gray-50">
-                  <td className="px-4 py-2.5 font-medium text-gray-900">{r.establishmentName}</td>
+                  <td className="px-4 py-2.5 font-medium text-gray-900">{estName(r.establishmentId)}</td>
                   <td className="px-4 py-2.5 text-gray-600">{r.scheduledDate}</td>
                   <td className="px-4 py-2.5">
                     <span className={`text-[11px] font-medium px-1.5 py-0.5 rounded-full ${

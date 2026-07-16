@@ -1,22 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Plus, X, Check, ChevronLeft, ChevronRight } from 'lucide-react';
-
-const SCHEDULE_KEY = 'bfp-inspection-schedule';
-const ESTABLISHMENT_KEY = 'bfp-establishments';
-
-function loadItems() {
-  try { const raw = localStorage.getItem(SCHEDULE_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return [];
-}
-
-function loadEstablishments() {
-  try { const raw = localStorage.getItem(ESTABLISHMENT_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return [];
-}
-
-function todayStr() {
-  return new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' });
-}
+import { InspectionsApi, EstablishmentsApi } from '../../lib/api';
 
 function formatDate(d: Date) {
   return d.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' });
@@ -33,14 +17,19 @@ const resultColors: Record<string, string> = {
 const results = ['Scheduled', 'Passed', 'Failed', 'Pending Compliance', 'Reinspection Required'];
 
 export default function InspectionSchedule() {
-  const [items, setItems] = useState<any[]>(loadItems);
-  const [establishments] = useState<any[]>(loadEstablishments);
+  const [items, setItems] = useState<any[]>([]);
+  const [establishments, setEstablishments] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
   const [form, setForm] = useState({ establishmentId: '', scheduledDate: '', result: 'Scheduled', inspector: '', notes: '' });
   const [weekOffset, setWeekOffset] = useState(0);
 
-  useEffect(() => { localStorage.setItem(SCHEDULE_KEY, JSON.stringify(items)); }, [items]);
+  useEffect(() => {
+    Promise.all([InspectionsApi.list(), EstablishmentsApi.list()])
+      .then(([i, e]) => { setItems(i); setEstablishments(e); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
 
   const today = new Date();
   const startOfWeek = new Date(today);
@@ -49,18 +38,23 @@ export default function InspectionSchedule() {
     const d = new Date(startOfWeek); d.setDate(startOfWeek.getDate() + i); return d;
   });
 
-  function getInspectionsForDate(date: string) {
-    return items.filter((s: any) => s.scheduledDate === date);
+  function estName(id: string) {
+    const e = establishments.find((x: any) => x.id === id);
+    return e?.businessName || id;
   }
 
-  function save() {
+  function getInspectionsForDate(dateStr: string) {
+    return items.filter((s: any) => s.scheduledDate === dateStr);
+  }
+
+  async function save() {
     if (!form.establishmentId || !form.scheduledDate) return;
-    const est = establishments.find((e: any) => e.id === form.establishmentId);
     if (editing) {
-      setItems((prev) => prev.map((i) => i.id === editing.id ? { ...i, ...form, establishmentName: est?.businessName || 'Unknown' } : i));
+      const updated = await InspectionsApi.update(editing.id, form);
+      setItems((prev) => prev.map((i) => i.id === editing.id ? { ...i, ...updated } : i));
     } else {
-      const id = crypto.randomUUID();
-      setItems((prev) => [{ id, ...form, establishmentName: est?.businessName || 'Unknown', createdAt: todayStr() }, ...prev]);
+      const created = await InspectionsApi.create(form);
+      setItems((prev) => [created, ...prev]);
     }
     setShowForm(false); setEditing(null);
     setForm({ establishmentId: '', scheduledDate: '', result: 'Scheduled', inspector: '', notes: '' });
@@ -71,9 +65,16 @@ export default function InspectionSchedule() {
     setEditing(item); setShowForm(true);
   }
 
-  function remove(id: string) { if (confirm('Delete this inspection?')) setItems((prev) => prev.filter((i) => i.id !== id)); }
+  async function remove(id: string) {
+    if (confirm('Delete this inspection?')) {
+      await InspectionsApi.delete(id);
+      setItems((prev) => prev.filter((i) => i.id !== id));
+    }
+  }
 
   const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  if (loading) return <div className="text-sm text-gray-500 p-4">Loading...</div>;
 
   return (
     <div className="space-y-6">
@@ -99,7 +100,8 @@ export default function InspectionSchedule() {
         </div>
         <div className="grid grid-cols-7 divide-x divide-gray-200">
           {weekDates.map((d, i) => {
-            const dayInspections = getInspectionsForDate(formatDate(d));
+            const dateStr = d.toISOString().split('T')[0];
+            const dayInspections = getInspectionsForDate(dateStr);
             const isToday = d.toDateString() === today.toDateString();
             return (
               <div key={i} className={`${isToday ? 'bg-red-50/30' : ''}`}>
@@ -113,7 +115,7 @@ export default function InspectionSchedule() {
                     <div key={ins.id}
                       onClick={() => edit(ins)}
                       className={`text-[10px] p-1 rounded cursor-pointer border ${resultColors[ins.result] || 'bg-gray-100'} border-transparent hover:opacity-80`}>
-                      <div className="font-medium truncate">{ins.establishmentName}</div>
+                      <div className="font-medium truncate">{estName(ins.establishmentId)}</div>
                       <div className="opacity-75">{ins.result}</div>
                     </div>
                   ))}
@@ -145,7 +147,7 @@ export default function InspectionSchedule() {
               {items.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-400">No inspections scheduled.</td></tr>}
               {items.map((r) => (
                 <tr key={r.id} className="border-b border-gray-100 hover:bg-gray-50">
-                  <td className="px-4 py-2.5 font-medium text-gray-900">{r.establishmentName}</td>
+                  <td className="px-4 py-2.5 font-medium text-gray-900">{estName(r.establishmentId)}</td>
                   <td className="px-4 py-2.5 text-gray-600">{r.scheduledDate}</td>
                   <td className="px-4 py-2.5 text-gray-600">{r.inspector || '—'}</td>
                   <td className="px-4 py-2.5">

@@ -1,17 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Plus, X, Check, FileText, Users, Clock } from 'lucide-react';
-
-const STORAGE_KEY = 'bfp-memoranda';
-const SEED = [
-  { id: '1', subject: 'Revised Fire Safety Guidelines 2026', from: 'SUPT Juan Dela Cruz', date: 'Jul 14, 2026', priority: 'High', status: 'Released' },
-  { id: '2', subject: 'Schedule of Fire Drills for Q3 2026', from: 'SINSP Maria Santos', date: 'Jul 12, 2026', priority: 'Normal', status: 'Approved' },
-  { id: '3', subject: 'Equipment Maintenance Reminder', from: 'FO3 Roberto Mendoza', date: 'Jul 10, 2026', priority: 'Normal', status: 'Draft' },
-];
-
-function loadItems() {
-  try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return SEED;
-}
+import { DocumentsApi } from '../../lib/api';
 
 const statusColors: Record<string, string> = {
   Draft: 'bg-gray-100 text-gray-600',
@@ -28,33 +17,63 @@ const priorityColors: Record<string, string> = {
 
 const statuses = ['Draft', 'Pending Approval', 'Approved', 'Released'];
 
+function parseMeta(doc: any) {
+  let meta: any = {};
+  try { meta = JSON.parse(doc.description || '{}'); } catch {}
+  return { ...doc, content: meta.content || '', from: meta.from || '', priority: meta.priority || 'Normal' };
+}
+
 export default function Memoranda() {
-  const [items, setItems] = useState<any[]>(loadItems);
+  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search] = useState('');
   const [filter, setFilter] = useState('All');
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ subject: '', content: '', priority: 'Normal' });
 
-  useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); }, [items]);
+  useEffect(() => {
+    DocumentsApi.list().then((data) => {
+      setItems(data.filter((d: any) => d.type === 'memorandum').map(parseMeta));
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, []);
 
-  function save() {
+  async function save() {
     if (!form.subject) return;
-    const id = crypto.randomUUID();
-    setItems((prev) => [{ id, ...form, from: 'Station Commander', date: new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }), status: 'Draft' }, ...prev]);
-    setShowForm(false); setForm({ subject: '', content: '', priority: 'Normal' });
+    const created = await DocumentsApi.create({
+      title: form.subject,
+      type: 'memorandum',
+      category: 'Memoranda',
+      description: JSON.stringify({ content: form.content, from: 'Station Commander', priority: form.priority }),
+      status: 'Draft',
+    });
+    setItems((prev) => [parseMeta(created), ...prev]);
+    setShowForm(false);
+    setForm({ subject: '', content: '', priority: 'Normal' });
   }
 
-  function updateStatus(id: string, s: string) { setItems((prev) => prev.map((i) => i.id === id ? { ...i, status: s } : i)); }
-  function remove(id: string) { if (confirm('Delete this memorandum?')) setItems((prev) => prev.filter((i) => i.id !== id)); }
+  async function updateStatus(id: string, s: string) {
+    const updated = await DocumentsApi.update(id, { status: s });
+    setItems((prev) => prev.map((i) => i.id === id ? parseMeta({ ...i, ...updated }) : i));
+  }
+
+  async function remove(id: string) {
+    if (confirm('Delete this memorandum?')) {
+      await DocumentsApi.delete(id);
+      setItems((prev) => prev.filter((i) => i.id !== id));
+    }
+  }
 
   const filtered = items.filter((r) => {
     if (filter !== 'All' && r.status !== filter) return false;
-    if (search) { const q = search.toLowerCase(); return r.subject.toLowerCase().includes(q) || r.from?.toLowerCase().includes(q); }
+    if (search) { const q = search.toLowerCase(); return r.title.toLowerCase().includes(q) || r.from?.toLowerCase().includes(q); }
     return true;
   });
 
   const counts: Record<string, number> = { All: items.length };
   statuses.forEach((s) => { counts[s] = items.filter((i) => i.status === s).length; });
+
+  if (loading) return <div className="text-sm text-gray-500 p-4">Loading...</div>;
 
   return (
     <div className="space-y-6">
@@ -86,12 +105,12 @@ export default function Memoranda() {
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-1">
                   <FileText size={14} className="text-gray-400" />
-                  <span className="text-sm font-medium text-gray-900">{r.subject}</span>
+                  <span className="text-sm font-medium text-gray-900">{r.title}</span>
                   <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${priorityColors[r.priority]}`}>{r.priority}</span>
                 </div>
                 <div className="flex items-center gap-3 text-xs text-gray-500 ml-6">
                   <span className="flex items-center gap-1"><Users size={11} /> {r.from}</span>
-                  <span className="flex items-center gap-1"><Clock size={11} /> {r.date}</span>
+                  <span className="flex items-center gap-1"><Clock size={11} /> {r.createdAt ? new Date(r.createdAt).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : '—'}</span>
                 </div>
                 {r.content && <p className="text-xs text-gray-600 mt-2 ml-6">{r.content}</p>}
               </div>

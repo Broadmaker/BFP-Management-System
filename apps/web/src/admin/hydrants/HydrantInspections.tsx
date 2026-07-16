@@ -1,54 +1,68 @@
 import { useState, useEffect } from 'react';
 import { Search, Plus, X, Check, ThumbsUp, ThumbsDown } from 'lucide-react';
-
-const INSPECTION_KEY = 'bfp-hydrant-inspections';
-const HYDRANT_KEY = 'bfp-hydrants';
-
-function loadInspections() {
-  try { const raw = localStorage.getItem(INSPECTION_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return [];
-}
-
-function loadHydrants() {
-  try { const raw = localStorage.getItem(HYDRANT_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return [];
-}
+import { HydrantInspectionsApi, HydrantsApi } from '../../lib/api';
 
 export default function HydrantInspections() {
-  const [items, setItems] = useState<any[]>(loadInspections);
-  const [hydrants, setHydrants] = useState<any[]>(loadHydrants);
+  const [items, setItems] = useState<any[]>([]);
+  const [hydrants, setHydrants] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('All');
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ hydrantId: '', waterPressure: '', isOperational: 'true' as string, remarks: '' });
 
-  useEffect(() => { localStorage.setItem(INSPECTION_KEY, JSON.stringify(items)); }, [items]);
+  useEffect(() => {
+    Promise.all([HydrantInspectionsApi.list(), HydrantsApi.list()]).then(([inspections, hydrantsData]) => {
+      setItems(inspections);
+      setHydrants(hydrantsData);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, []);
 
-  function save() {
+  async function save() {
     if (!form.hydrantId) return;
     const hydrant = hydrants.find((h: any) => h.id === form.hydrantId);
     const isOp = form.isOperational === 'true';
-    const id = crypto.randomUUID();
-    const dateStr = new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' });
-    setItems((prev) => [{ id, ...form, hydrantName: hydrant?.hydrantId || 'Unknown', barangay: hydrant?.barangay || '', isOperational: isOp, date: dateStr }, ...prev]);
-    setHydrants((prev) => prev.map((h) => h.id === form.hydrantId ? {
-      ...h, lastInspected: dateStr, waterPressure: form.waterPressure || h.waterPressure,
+    const inspectedDate = new Date().toISOString();
+    const created = await HydrantInspectionsApi.create({
+      hydrantId: form.hydrantId,
+      inspectedDate,
+      waterPressure: form.waterPressure ? Number(form.waterPressure) : null,
+      isOperational: isOp,
+      remarks: form.remarks,
+    });
+    await HydrantsApi.update(form.hydrantId, {
+      lastInspectedDate: inspectedDate,
+      waterPressure: form.waterPressure ? Number(form.waterPressure) : hydrant?.waterPressure,
       status: isOp ? 'Operational' : 'Under Repair',
-    } : h));
+    });
+    setItems((prev) => [created, ...prev]);
+    setHydrants((prev) => prev.map((h) => h.id === form.hydrantId ? { ...h, lastInspectedDate: inspectedDate, waterPressure: form.waterPressure ? Number(form.waterPressure) : h.waterPressure, status: isOp ? 'Operational' : 'Under Repair' } : h));
     setShowForm(false);
     setForm({ hydrantId: '', waterPressure: '', isOperational: 'true', remarks: '' });
   }
 
-  function remove(id: string) { if (confirm('Delete this inspection?')) setItems((prev) => prev.filter((i) => i.id !== id)); }
+  async function remove(id: string) {
+    if (confirm('Delete this inspection?')) {
+      await HydrantInspectionsApi.delete(id);
+      setItems((prev) => prev.filter((i) => i.id !== id));
+    }
+  }
 
   const filtered = items.filter((r) => {
     if (filter !== 'All' && (filter === 'Operational' ? !r.isOperational : r.isOperational)) return false;
-    if (search) { const q = search.toLowerCase(); return r.hydrantName?.toLowerCase().includes(q) || r.barangay?.toLowerCase().includes(q); }
+    if (search) {
+      const q = search.toLowerCase();
+      const hydrant = hydrants.find((h) => h.id === r.hydrantId);
+      return hydrant?.hydrantId?.toLowerCase().includes(q) || hydrant?.barangay?.toLowerCase().includes(q);
+    }
     return true;
   });
 
   const passed = items.filter((i) => i.isOperational).length;
   const failed = items.filter((i) => !i.isOperational).length;
+
+  if (loading) return <div className="text-sm text-gray-500 p-4">Loading...</div>;
 
   return (
     <div className="space-y-6">
@@ -118,23 +132,26 @@ export default function HydrantInspections() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((r) => (
-                <tr key={r.id} className="border-b border-gray-100 hover:bg-gray-50">
-                  <td className="px-4 py-2.5 text-gray-600">{r.date}</td>
-                  <td className="px-4 py-2.5 font-mono text-xs font-semibold text-gray-900">{r.hydrantName}</td>
-                  <td className="px-4 py-2.5 text-gray-600">{r.barangay}</td>
-                  <td className="px-4 py-2.5 text-gray-900 font-medium">{r.waterPressure ? `${r.waterPressure} PSI` : '—'}</td>
-                  <td className="px-4 py-2.5">
-                    <span className={`text-[11px] font-medium px-1.5 py-0.5 rounded-full ${r.isOperational ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                      {r.isOperational ? 'Operational' : 'Needs Repair'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2.5 text-gray-500 text-xs">{r.remarks || '—'}</td>
-                  <td className="px-4 py-2.5">
-                    <button onClick={() => remove(r.id)} className="p-1 text-gray-400 hover:text-red-600"><X size={14} /></button>
-                  </td>
-                </tr>
-              ))}
+              {filtered.map((r) => {
+                const hydrant = hydrants.find((h) => h.id === r.hydrantId);
+                return (
+                  <tr key={r.id} className="border-b border-gray-100 hover:bg-gray-50">
+                    <td className="px-4 py-2.5 text-gray-600">{r.inspectedDate ? new Date(r.inspectedDate).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : '—'}</td>
+                    <td className="px-4 py-2.5 font-mono text-xs font-semibold text-gray-900">{hydrant?.hydrantId || 'Unknown'}</td>
+                    <td className="px-4 py-2.5 text-gray-600">{hydrant?.barangay || ''}</td>
+                    <td className="px-4 py-2.5 text-gray-900 font-medium">{r.waterPressure ? `${r.waterPressure} PSI` : '—'}</td>
+                    <td className="px-4 py-2.5">
+                      <span className={`text-[11px] font-medium px-1.5 py-0.5 rounded-full ${r.isOperational ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                        {r.isOperational ? 'Operational' : 'Needs Repair'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2.5 text-gray-500 text-xs">{r.remarks || '—'}</td>
+                    <td className="px-4 py-2.5">
+                      <button onClick={() => remove(r.id)} className="p-1 text-gray-400 hover:text-red-600"><X size={14} /></button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

@@ -1,0 +1,1 @@
+ALTER TABLE `program_participants` ADD `barangay` text;

@@ -2,95 +2,56 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area } from 'recharts';
 import { TrendingUp, TrendingDown, Activity, Users, AlertTriangle, Building2, Truck, Flame } from 'lucide-react';
-
-const STORAGE_KEYS = {
-  incidents: 'bfp-incidents',
-  inspections: 'bfp-inspections',
-  personnel: 'bfp-personnel',
-  equipment: 'bfp-equipment',
-  vehicles: 'bfp-vehicles',
-  hydrants: 'bfp-hydrants',
-  violations: 'bfp-violations',
-  certificates: 'bfp-certificates',
-  attendance: 'bfp-attendance',
-  leave: 'bfp-leave',
-};
-
-function loadItems(key: string) {
-  try { const raw = localStorage.getItem(key); if (raw) return JSON.parse(raw); } catch {}
-  return [];
-}
+import { ReportsApi } from '../../lib/api';
 
 const COLORS = ['#dc2626', '#0ea5e9', '#eab308', '#22c55e', '#a855f7', '#f97316', '#6366f1', '#ec4899'];
-
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 type KPI = { label: string; value: number; icon: any; color: string; trend: 'up' | 'down' | 'neutral'; pct: string; link: string };
 
 export default function ReportsDashboard() {
   const [data, setData] = useState<any>({});
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const incidents = loadItems(STORAGE_KEYS.incidents);
-    const inspections = loadItems(STORAGE_KEYS.inspections);
-    const personnel = loadItems(STORAGE_KEYS.personnel);
-    const equipment = loadItems(STORAGE_KEYS.equipment);
-    const vehicles = loadItems(STORAGE_KEYS.vehicles);
-    const hydrants = loadItems(STORAGE_KEYS.hydrants);
-    const violations = loadItems(STORAGE_KEYS.violations);
-    const certificates = loadItems(STORAGE_KEYS.certificates);
-    const attendance = loadItems(STORAGE_KEYS.attendance);
-    const leave = loadItems(STORAGE_KEYS.leave);
+    Promise.all([ReportsApi.overview(), ReportsApi.incidents(), ReportsApi.inspections()])
+      .then(([overview, incidents, inspections]: any[]) => {
+        const typeMap: Record<string, number> = {};
+        (incidents || []).forEach((i: any) => { typeMap[i.type] = (typeMap[i.type] || 0) + 1; });
+        const typeData = Object.entries(typeMap).map(([name, value]) => ({ name, value }));
 
-    // Incident type breakdown
-    const typeMap: Record<string, number> = {};
-    incidents.forEach((i: any) => { typeMap[i.type] = (typeMap[i.type] || 0) + 1; });
-    const typeData = Object.entries(typeMap).map(([name, value]) => ({ name, value }));
+        const sevMap: Record<string, number> = {};
+        (incidents || []).forEach((i: any) => { sevMap[i.severity] = (sevMap[i.severity] || 0) + 1; });
+        const sevData = Object.entries(sevMap).map(([name, value]) => ({ name, value }));
 
-    // Incident severity breakdown
-    const sevMap: Record<string, number> = {};
-    incidents.forEach((i: any) => { sevMap[i.severity] = (sevMap[i.severity] || 0) + 1; });
-    const sevData = Object.entries(sevMap).map(([name, value]) => ({ name, value }));
+        const monthMap: Record<string, number> = {};
+        MONTHS.forEach(m => { monthMap[m] = 0; });
+        (incidents || []).forEach((i: any) => {
+          if (i.date) {
+            try { const d = new Date(i.date); monthMap[MONTHS[d.getMonth()]]++; } catch {}
+          }
+        });
+        const trendData = MONTHS.map(m => ({ month: m, incidents: monthMap[m] || 0 }));
 
-    // Monthly incident trend
-    const monthMap: Record<string, number> = {};
-    MONTHS.forEach(m => { monthMap[m] = 0; });
-    incidents.forEach((i: any) => {
-      if (i.date) {
-        try {
-          const d = new Date(i.date);
-          const m = MONTHS[d.getMonth()];
-          monthMap[m] = (monthMap[m] || 0) + 1;
-        } catch {}
-      }
-    });
-    const trendData = MONTHS.map(m => ({ month: m, incidents: monthMap[m] || 0 }));
+        const passCount = (inspections || []).filter((i: any) => i.result === 'Passed').length;
+        const failCount = (inspections || []).filter((i: any) => i.result === 'Failed').length;
+        const pendingInsp = (inspections || []).filter((i: any) => !i.result || i.result === 'Pending Compliance' || i.result === 'Reinspection Required').length;
 
-    // Inspection results
-    const passCount = inspections.filter((i: any) => i.result === 'Passed').length;
-    const failCount = inspections.filter((i: any) => i.result === 'Failed').length;
-    const pendingInsp = inspections.filter((i: any) => !i.result || i.result === 'Pending Compliance' || i.result === 'Reinspection Required').length;
-
-    // Attendance
-    const present = attendance.filter((a: any) => a.type === 'Present').length;
-    const absent = attendance.filter((a: any) => a.type === 'Absent').length;
-    const late = attendance.filter((a: any) => a.type === 'Late').length;
-    const onLeaveCount = attendance.filter((a: any) => a.type === 'On Leave').length;
-
-    setData({
-      incidents, inspections, personnel, equipment, vehicles, hydrants, violations, certificates, attendance, leave,
-      typeData, sevData, trendData, passCount, failCount, pendingInsp, present, absent, late, onLeaveCount,
-    });
+        setData({ overview, incidents, inspections, typeData, sevData, trendData, passCount, failCount, pendingInsp });
+        setLoading(false);
+      }).catch(() => setLoading(false));
   }, []);
 
   const kpis: KPI[] = [
-    { label: 'Total Incidents', value: data.incidents?.length || 0, icon: Flame, color: 'bg-red-500', trend: 'up', pct: '+12%', link: '/admin/reports/incidents' },
-    { label: 'Open Violations', value: data.violations?.filter((v: any) => v.status === 'Open').length || 0, icon: AlertTriangle, color: 'bg-orange-500', trend: 'up', pct: '+3%', link: '/admin/compliance' },
-    { label: 'Active Personnel', value: data.personnel?.length || 0, icon: Users, color: 'bg-blue-500', trend: 'up', pct: '+5%', link: '/admin/reports/personnel' },
-    { label: 'Inspections Done', value: data.inspections?.length || 0, icon: Building2, color: 'bg-emerald-500', trend: 'down', pct: '+8%', link: '/admin/reports/inspections' },
-    { label: 'Equipment', value: data.equipment?.length || 0, icon: Activity, color: 'bg-purple-500', trend: 'neutral', pct: '0%', link: '/admin/equipment' },
-    { label: 'Vehicles', value: data.vehicles?.length || 0, icon: Truck, color: 'bg-cyan-500', trend: 'neutral', pct: '0%', link: '/admin/vehicles' },
+    { label: 'Total Incidents', value: data.overview?.incidentsCount ?? (data.incidents?.length || 0), icon: Flame, color: 'bg-red-500', trend: 'up', pct: '+12%', link: '/admin/reports/incidents' },
+    { label: 'Open Violations', value: data.overview?.openViolations ?? 0, icon: AlertTriangle, color: 'bg-orange-500', trend: 'up', pct: '+3%', link: '/admin/compliance' },
+    { label: 'Active Personnel', value: data.overview?.activePersonnel ?? 0, icon: Users, color: 'bg-blue-500', trend: 'up', pct: '+5%', link: '/admin/reports/personnel' },
+    { label: 'Inspections Done', value: data.overview?.inspectionsCount ?? (data.inspections?.length || 0), icon: Building2, color: 'bg-emerald-500', trend: 'down', pct: '+8%', link: '/admin/reports/inspections' },
+    { label: 'Equipment', value: data.overview?.equipmentCount ?? 0, icon: Activity, color: 'bg-purple-500', trend: 'neutral', pct: '0%', link: '/admin/equipment' },
+    { label: 'Vehicles', value: data.overview?.vehiclesCount ?? 0, icon: Truck, color: 'bg-cyan-500', trend: 'neutral', pct: '0%', link: '/admin/vehicles' },
   ];
+
+  if (loading) return <div className="text-sm text-gray-500 p-4">Loading...</div>;
 
   return (
     <div className="space-y-6">

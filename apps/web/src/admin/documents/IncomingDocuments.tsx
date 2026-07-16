@@ -1,17 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Search, Plus, X, Check } from 'lucide-react';
-
-const STORAGE_KEY = 'bfp-incoming-docs';
-const SEED = [
-  { id: '1', title: 'Annual Fire Safety Report - Region IX', sender: 'BFP Regional Office IX', date: 'Jul 12, 2026', status: 'Received', deadline: 'Jul 30, 2026' },
-  { id: '2', title: 'Directive on Updated Fire Code Implementation', sender: 'BFP National Headquarters', date: 'Jul 10, 2026', status: 'For Review', deadline: 'Jul 25, 2026' },
-  { id: '3', title: 'Request for Station Inventory Report', sender: 'Provincial Fire Marshal', date: 'Jul 8, 2026', status: 'Completed', deadline: 'Jul 20, 2026' },
-];
-
-function loadItems() {
-  try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return SEED;
-}
+import { DocumentsApi } from '../../lib/api';
 
 const statusColors: Record<string, string> = {
   Received: 'bg-blue-100 text-blue-700',
@@ -22,24 +11,52 @@ const statusColors: Record<string, string> = {
 
 const statuses = ['Received', 'For Review', 'Completed', 'Archived'];
 
+function parseMeta(doc: any) {
+  let meta: any = {};
+  try { meta = JSON.parse(doc.description || '{}'); } catch {}
+  return { ...doc, sender: meta.sender || '', deadline: meta.deadline || '', remarks: meta.remarks || '' };
+}
+
 export default function IncomingDocuments() {
-  const [items, setItems] = useState<any[]>(loadItems);
+  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('All');
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ title: '', sender: '', deadline: '', remarks: '' });
 
-  useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); }, [items]);
+  useEffect(() => {
+    DocumentsApi.list().then((data) => {
+      setItems(data.filter((d: any) => d.type === 'incoming').map(parseMeta));
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, []);
 
-  function save() {
+  async function save() {
     if (!form.title || !form.sender) return;
-    const id = crypto.randomUUID();
-    setItems((prev) => [{ id, ...form, date: new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }), status: 'Received' }, ...prev]);
-    setShowForm(false); setForm({ title: '', sender: '', deadline: '', remarks: '' });
+    const created = await DocumentsApi.create({
+      title: form.title,
+      type: 'incoming',
+      category: 'Incoming',
+      description: JSON.stringify({ sender: form.sender, deadline: form.deadline, remarks: form.remarks }),
+      status: 'Received',
+    });
+    setItems((prev) => [parseMeta(created), ...prev]);
+    setShowForm(false);
+    setForm({ title: '', sender: '', deadline: '', remarks: '' });
   }
 
-  function updateStatus(id: string, status: string) { setItems((prev) => prev.map((i) => i.id === id ? { ...i, status } : i)); }
-  function remove(id: string) { if (confirm('Remove this document?')) setItems((prev) => prev.filter((i) => i.id !== id)); }
+  async function updateStatus(id: string, status: string) {
+    const updated = await DocumentsApi.update(id, { status });
+    setItems((prev) => prev.map((i) => i.id === id ? parseMeta({ ...i, ...updated }) : i));
+  }
+
+  async function remove(id: string) {
+    if (confirm('Remove this document?')) {
+      await DocumentsApi.delete(id);
+      setItems((prev) => prev.filter((i) => i.id !== id));
+    }
+  }
 
   const filtered = items.filter((r) => {
     if (filter !== 'All' && r.status !== filter) return false;
@@ -49,6 +66,8 @@ export default function IncomingDocuments() {
 
   const counts: Record<string, number> = { All: items.length };
   statuses.forEach((s) => { counts[s] = items.filter((i) => i.status === s).length; });
+
+  if (loading) return <div className="text-sm text-gray-500 p-4">Loading...</div>;
 
   return (
     <div className="space-y-6">
@@ -105,7 +124,7 @@ export default function IncomingDocuments() {
                 <tr key={r.id} className="border-b border-gray-100 hover:bg-gray-50">
                   <td className="px-4 py-2.5 font-medium text-gray-900">{r.title}</td>
                   <td className="px-4 py-2.5 text-gray-600">{r.sender}</td>
-                  <td className="px-4 py-2.5 text-gray-600">{r.date}</td>
+                  <td className="px-4 py-2.5 text-gray-600">{r.createdAt ? new Date(r.createdAt).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : '—'}</td>
                   <td className="px-4 py-2.5 text-gray-600">{r.deadline || '—'}</td>
                   <td className="px-4 py-2.5">
                     <select value={r.status} onChange={(e) => updateStatus(r.id, e.target.value)}

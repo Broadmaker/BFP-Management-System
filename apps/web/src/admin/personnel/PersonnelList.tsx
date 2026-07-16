@@ -1,27 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Search, Plus, Pencil, Trash2, X, Check, Users, GraduationCap } from 'lucide-react';
-
-const STORAGE_KEY = 'bfp-personnel';
-const SEED = [
-  { id: 'BFP-001', name: 'SUPT Juan Dela Cruz', rank: 'SUPT', position: 'Station Commander', assignment: 'Ipil Station', contact: '0917-000-0001', status: 'Active' },
-  { id: 'BFP-002', name: 'SINSP Maria Santos', rank: 'SINSP', position: 'Fire Officer', assignment: 'Inspection Division', contact: '0917-000-0002', status: 'Active' },
-  { id: 'BFP-003', name: 'FO3 Roberto Mendoza', rank: 'FO3', position: 'Fire Officer', assignment: 'Operations', contact: '0917-000-0003', status: 'Active' },
-  { id: 'BFP-004', name: 'FO1 Pedro Reyes', rank: 'FO1', position: 'Fire Officer', assignment: 'Operations', contact: '0917-000-0004', status: 'Active' },
-  { id: 'BFP-005', name: 'Ana Gonzales', rank: 'NUP', position: 'Admin Officer', assignment: 'Admin Division', contact: '0917-000-0005', status: 'Active' },
-  { id: 'BFP-006', name: 'Carlos Lim', rank: 'NUP', position: 'Logistics Officer', assignment: 'Logistics Division', contact: '0917-000-0006', status: 'Active' },
-  { id: 'BFP-007', name: 'FO2 Jose Reyes', rank: 'FO2', position: 'Fire Fighter', assignment: 'Ipil Station', contact: '0917-000-0007', status: 'Active' },
-  { id: 'BFP-008', name: 'FO1 Ana Cruz', rank: 'FO1', position: 'Fire Fighter', assignment: 'Ipil Station', contact: '0917-000-0008', status: 'Active' },
-  { id: 'BFP-009', name: 'FO2 Mark Tan', rank: 'FO2', position: 'Driver', assignment: 'Ipil Station', contact: '0917-000-0009', status: 'Active' },
-  { id: 'BFP-010', name: 'FO1 Lisa Mendoza', rank: 'FO1', position: 'EMT', assignment: 'Ipil Station', contact: '0917-000-0010', status: 'Active' },
-];
-
-function loadItems() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch {}
-  return SEED;
-}
+import { PersonnelApi } from '../../lib/api';
 
 const statusColors: Record<string, string> = {
   Active: 'bg-green-100 text-green-700',
@@ -30,46 +9,82 @@ const statusColors: Record<string, string> = {
 };
 
 export default function PersonnelList() {
-  const [items, setItems] = useState<any[]>(loadItems);
+  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('All');
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
   const [form, setForm] = useState({ name: '', rank: '', position: '', assignment: '', contact: '' });
 
-  useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); }, [items]);
+  useEffect(() => {
+    PersonnelApi.list().then((data) => {
+      setItems(data);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, []);
 
-  function save() {
+  async function save() {
     if (editing) {
-      setItems((prev) => prev.map((i) => i.id === editing.id ? { ...i, ...form } : i));
+      const updated = await PersonnelApi.update(editing.id, {
+        name: form.name,
+        rank: form.rank,
+        position: form.position,
+        assignment: form.assignment,
+        contactNumber: form.contact,
+      });
+      setItems((prev) => prev.map((i) => i.id === editing.id ? { ...i, ...updated } : i));
     } else {
-      const id = `BFP-${String(items.length + 1).padStart(3, '0')}`;
-      setItems((prev) => [{ id, ...form, status: 'Active' }, ...prev]);
+      const created = await PersonnelApi.create({
+        name: form.name,
+        employeeNumber: `BFP-${String(Date.now()).slice(-4)}`,
+        rank: form.rank,
+        position: form.position,
+        assignment: form.assignment,
+        contactNumber: form.contact,
+        isActive: true,
+      });
+      setItems((prev) => [created, ...prev]);
     }
     setShowForm(false); setEditing(null); setForm({ name: '', rank: '', position: '', assignment: '', contact: '' });
   }
 
   function edit(item: any) {
-    setForm({ name: item.name, rank: item.rank, position: item.position, assignment: item.assignment, contact: item.contact });
+    setForm({ name: item.name || '', rank: item.rank || '', position: item.position || '', assignment: item.assignment || '', contact: item.contactNumber || '' });
     setEditing(item); setShowForm(true);
   }
 
-  function remove(id: string) {
-    if (confirm('Remove this personnel record?')) setItems((prev) => prev.filter((i) => i.id !== id));
+  async function remove(id: string) {
+    if (confirm('Remove this personnel record?')) {
+      await PersonnelApi.delete(id);
+      setItems((prev) => prev.filter((i) => i.id !== id));
+    }
   }
 
-  function toggleStatus(item: any) {
-    setItems((prev) => prev.map((i) => i.id === item.id ? { ...i, status: i.status === 'Active' ? 'Inactive' : 'Active' } : i));
+  async function toggleStatus(item: any) {
+    const active = !item.isActive;
+    const updated = await PersonnelApi.update(item.id, { isActive: active });
+    setItems((prev) => prev.map((i) => i.id === item.id ? { ...i, ...updated } : i));
   }
 
   const filtered = items.filter((r) => {
-    if (filter !== 'All' && r.status !== filter) return false;
-    if (search) { const q = search.toLowerCase(); return r.name.toLowerCase().includes(q) || r.id.toLowerCase().includes(q) || r.position.toLowerCase().includes(q); }
+    if (filter !== 'All') {
+      const s = r.isActive ? 'Active' : 'Inactive';
+      if (s !== filter) return false;
+    }
+    if (search) {
+      const q = search.toLowerCase();
+      return (r.name || '').toLowerCase().includes(q)
+        || (r.employeeNumber || '').toLowerCase().includes(q)
+        || (r.position || '').toLowerCase().includes(q);
+    }
     return true;
   });
 
-  const active = items.filter((i) => i.status === 'Active').length;
-  const inactive = items.filter((i) => i.status === 'Inactive').length;
+  const active = items.filter((i) => i.isActive).length;
+  const inactive = items.filter((i) => !i.isActive).length;
+
+  if (loading) return <div className="text-sm text-gray-500 p-4">Loading...</div>;
 
   return (
     <div className="space-y-6">
@@ -156,16 +171,16 @@ export default function PersonnelList() {
             <tbody>
               {filtered.map((r) => (
                 <tr key={r.id} className="border-b border-gray-100 hover:bg-gray-50">
-                  <td className="px-4 py-2.5 font-mono text-xs text-gray-900">{r.id}</td>
-                  <td className="px-4 py-2.5 font-medium text-gray-900">{r.name}</td>
+                  <td className="px-4 py-2.5 font-mono text-xs text-gray-900">{r.employeeNumber}</td>
+                  <td className="px-4 py-2.5 font-medium text-gray-900">{r.name || r.employeeNumber}</td>
                   <td className="px-4 py-2.5 text-gray-600">{r.rank || '—'}</td>
                   <td className="px-4 py-2.5 text-gray-600">{r.position}</td>
                   <td className="px-4 py-2.5 text-gray-600">{r.assignment}</td>
-                  <td className="px-4 py-2.5 text-gray-600">{r.contact}</td>
+                  <td className="px-4 py-2.5 text-gray-600">{r.contactNumber}</td>
                   <td className="px-4 py-2.5">
                     <button onClick={() => toggleStatus(r)}
-                      className={`text-[11px] font-medium px-1.5 py-0.5 rounded-full ${statusColors[r.status] || 'bg-gray-100 text-gray-600'} cursor-pointer`}>
-                      {r.status}
+                      className={`text-[11px] font-medium px-1.5 py-0.5 rounded-full ${r.isActive ? statusColors.Active : statusColors.Inactive} cursor-pointer`}>
+                      {r.isActive ? 'Active' : 'Inactive'}
                     </button>
                   </td>
                   <td className="px-4 py-2.5">

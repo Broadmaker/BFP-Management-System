@@ -290,6 +290,7 @@ export const programParticipants = sqliteTable('program_participants', {
   name: text('name').notNull(),
   contactNumber: text('contact_number'),
   email: text('email'),
+  barangay: text('barangay'),
   attended: integer('attended', { mode: 'boolean' }).default(false),
   registeredAt: text('registered_at').notNull(),
 });

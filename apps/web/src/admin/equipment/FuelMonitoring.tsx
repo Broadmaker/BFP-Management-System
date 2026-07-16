@@ -1,48 +1,55 @@
 import { useState, useEffect } from 'react';
 import { Search, Plus, X, Check, Fuel, Gauge, TrendingDown } from 'lucide-react';
-
-const STORAGE_KEY = 'bfp-fuel-logs';
-const VEHICLE_KEY = 'bfp-vehicles';
-
-function loadItems() {
-  try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return [];
-}
-
-function loadVehicles() {
-  try { const raw = localStorage.getItem(VEHICLE_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return [];
-}
-
-const todayISO = () => new Date().toISOString().split('T')[0];
+import { FuelApi, VehiclesApi } from '../../lib/api';
 
 export default function FuelMonitoring() {
-  const [items, setItems] = useState<any[]>(loadItems);
-  const [vehicles] = useState<any[]>(loadVehicles);
+  const [items, setItems] = useState<any[]>([]);
+  const [vehicles, setVehicles] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ vehicleId: '', liters: '', cost: '', mileage: '', remarks: '' });
 
-  useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); }, [items]);
+  useEffect(() => {
+    Promise.all([FuelApi.list(), VehiclesApi.list()])
+      .then(([f, v]) => { setItems(f); setVehicles(v); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
 
-  function save() {
+  async function save() {
     if (!form.vehicleId || !form.liters) return;
-    const vehicle = vehicles.find((v: any) => v.id === form.vehicleId);
-    const id = crypto.randomUUID();
-    setItems((prev) => [{ id, ...form, vehicleName: vehicle?.name || 'Unknown', plateNumber: vehicle?.plateNumber || '', date: todayISO() }, ...prev]);
+    const created = await FuelApi.create(form);
+    setItems((prev) => [created, ...prev]);
     setShowForm(false);
     setForm({ vehicleId: '', liters: '', cost: '', mileage: '', remarks: '' });
   }
 
-  function remove(id: string) { if (confirm('Delete this fuel log?')) setItems((prev) => prev.filter((i) => i.id !== id)); }
+  async function remove(id: string) {
+    if (confirm('Delete this fuel log?')) {
+      await FuelApi.delete(id);
+      setItems((prev) => prev.filter((i) => i.id !== id));
+    }
+  }
+
+  function vehicleName(id: string) {
+    const v = vehicles.find((x: any) => x.id === id);
+    return v ? `${v.name} (${v.plateNumber})` : id;
+  }
+
+  function plateNumber(id: string) {
+    const v = vehicles.find((x: any) => x.id === id);
+    return v?.plateNumber || '—';
+  }
 
   const filtered = items.filter((r) => {
-    if (search) { const q = search.toLowerCase(); return r.vehicleName?.toLowerCase().includes(q) || r.plateNumber?.toLowerCase().includes(q); }
+    if (search) { const q = search.toLowerCase(); return vehicleName(r.vehicleId).toLowerCase().includes(q); }
     return true;
   });
 
   const totalLiters = items.reduce((s: number, i: any) => s + Number(i.liters || 0), 0);
   const totalCost = items.reduce((s: number, i: any) => s + Number(i.cost || 0), 0);
+
+  if (loading) return <div className="text-sm text-gray-500 p-4">Loading...</div>;
 
   return (
     <div className="space-y-6">
@@ -116,8 +123,8 @@ export default function FuelMonitoring() {
               {filtered.map((r) => (
                 <tr key={r.id} className="border-b border-gray-100 hover:bg-gray-50">
                   <td className="px-4 py-2.5 text-gray-600">{r.date}</td>
-                  <td className="px-4 py-2.5 font-medium text-gray-900">{r.vehicleName}</td>
-                  <td className="px-4 py-2.5 font-mono text-xs text-gray-600">{r.plateNumber}</td>
+                  <td className="px-4 py-2.5 font-medium text-gray-900">{vehicleName(r.vehicleId)}</td>
+                  <td className="px-4 py-2.5 font-mono text-xs text-gray-600">{plateNumber(r.vehicleId)}</td>
                   <td className="px-4 py-2.5 text-gray-900 font-medium">{Number(r.liters).toLocaleString()} L</td>
                   <td className="px-4 py-2.5 text-gray-600">₱{Number(r.cost || 0).toLocaleString()}</td>
                   <td className="px-4 py-2.5 text-gray-600">{r.mileage ? `${Number(r.mileage).toLocaleString()} km` : '—'}</td>

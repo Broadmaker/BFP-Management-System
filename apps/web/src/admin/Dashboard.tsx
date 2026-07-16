@@ -1,32 +1,47 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { AlertTriangle, Users, Plus, ArrowRight, Globe, Megaphone, BarChart3, FileText, Calendar } from 'lucide-react';
-
-function loadJSON(key: string, fallback: any[] = []) {
-  try { const raw = localStorage.getItem(key); if (raw) return JSON.parse(raw); } catch {}
-  return fallback;
-}
+import { ServiceRequestsApi, AppointmentsApi, HazardReportsApi, ReportsApi } from '../lib/api';
 
 function todayStr() {
   return new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' });
 }
 
 export default function Dashboard() {
-  const [serviceRequests] = useState(() => loadJSON('bfp-service-requests'));
-  const [appointments] = useState(() => loadJSON('bfp-appointments'));
-  const [hazardReports] = useState(() => loadJSON('bfp-hazard-reports'));
-  const [seminarRegs] = useState(() => loadJSON('bfp-seminar-registrations'));
+  const [serviceRequests, setServiceRequests] = useState<any[]>([]);
+  const [appointments, setAppointments] = useState<any[]>([]);
+  const [hazardReports, setHazardReports] = useState<any[]>([]);
+  const [overview, setOverview] = useState<any>({});
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.all([
+      ServiceRequestsApi.list(),
+      AppointmentsApi.list(),
+      HazardReportsApi.list(),
+      ReportsApi.overview(),
+    ]).then(([sr, appt, haz, ov]) => {
+      setServiceRequests(sr);
+      setAppointments(appt);
+      setHazardReports(haz);
+      setOverview(ov);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, []);
 
   const pendingRequests = serviceRequests.filter((r: any) => r.status === 'Pending').length;
   const newHazards = hazardReports.filter((h: any) => h.status === 'New').length;
-  const todayAppts = appointments.filter((a: any) => a.date === todayStr()).length;
-  const totalRegs = seminarRegs.length;
+  const todayAppts = appointments.filter((a: any) => {
+    if (!a.date) return false;
+    const d = new Date(a.date);
+    return d.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) === todayStr();
+  }).length;
 
   const stats = [
     { label: 'Pending Service Requests', value: String(pendingRequests), icon: FileText, color: 'text-red-600', bg: 'bg-red-50', to: '/admin/public-service' },
     { label: 'Appointments Today', value: String(todayAppts), icon: Calendar, color: 'text-blue-600', bg: 'bg-blue-50', to: '/admin/public-service/appointments' },
     { label: 'New Hazard Reports', value: String(newHazards), icon: AlertTriangle, color: 'text-orange-600', bg: 'bg-orange-50', to: '/admin/public-service/hazards' },
-    { label: 'Seminar Registrations', value: String(totalRegs), icon: Users, color: 'text-green-600', bg: 'bg-green-50', to: '/admin/public-service/seminars' },
+    { label: 'Total Incidents', value: String(overview.incidentsCount ?? 0), icon: Users, color: 'text-green-600', bg: 'bg-green-50', to: '/admin/reports/incidents' },
   ];
 
   const recentHazards = hazardReports.slice(0, 3);
@@ -36,6 +51,8 @@ export default function Dashboard() {
     New: 'bg-red-100 text-red-700', 'Under Investigation': 'bg-yellow-100 text-yellow-700',
     Resolved: 'bg-green-100 text-green-700', Closed: 'bg-gray-100 text-gray-500',
   };
+
+  if (loading) return <div className="text-sm text-gray-500 p-4">Loading...</div>;
 
   return (
     <div className="space-y-6">
@@ -102,9 +119,7 @@ export default function Dashboard() {
                     <td className="px-4 py-2.5 text-gray-600">{a.date}</td>
                     <td className="px-4 py-2.5 text-gray-600">{a.time}</td>
                     <td className="px-4 py-2.5">
-                      <span className={`text-[11px] font-medium px-1.5 py-0.5 rounded-full ${
-                        a.status === 'Confirmed' ? 'bg-blue-100 text-blue-700' : 'bg-yellow-100 text-yellow-700'
-                      }`}>{a.status}</span>
+                      <span className={`text-[11px] font-medium px-1.5 py-0.5 rounded-full ${a.status === 'Confirmed' ? 'bg-blue-100 text-blue-700' : 'bg-yellow-100 text-yellow-700'}`}>{a.status}</span>
                     </td>
                   </tr>
                 ))}
@@ -178,8 +193,8 @@ export default function Dashboard() {
                 <span className="text-xs font-semibold text-gray-900">{hazardReports.length}</span>
               </Link>
               <Link to="/admin/public-service/seminars" className="flex items-center justify-between py-1 border-b border-gray-100 last:border-0">
-                <span className="text-xs text-gray-600">Registrations</span>
-                <span className="text-xs font-semibold text-gray-900">{seminarRegs.length}</span>
+                <span className="text-xs text-gray-600">Incidents</span>
+                <span className="text-xs font-semibold text-gray-900">{overview.incidentsCount ?? 0}</span>
               </Link>
             </div>
           </div>

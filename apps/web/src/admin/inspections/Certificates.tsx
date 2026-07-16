@@ -1,18 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Search, Plus, X, Check } from 'lucide-react';
-
-const STORAGE_KEY = 'bfp-certificates';
-const ESTABLISHMENT_KEY = 'bfp-establishments';
-
-function loadItems() {
-  try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return [];
-}
-
-function loadEstablishments() {
-  try { const raw = localStorage.getItem(ESTABLISHMENT_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return [];
-}
+import { CertificatesApi, EstablishmentsApi } from '../../lib/api';
 
 const statusColors: Record<string, string> = {
   Active: 'bg-green-100 text-green-700',
@@ -30,36 +18,55 @@ function isExpired(dateStr: string) {
 }
 
 export default function Certificates() {
-  const [items, setItems] = useState<any[]>(loadItems);
-  const [establishments] = useState<any[]>(loadEstablishments);
+  const [items, setItems] = useState<any[]>([]);
+  const [establishments, setEstablishments] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('All');
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ establishmentId: '', certificateNumber: '', issuedDate: '', expiryDate: '' });
 
-  useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); }, [items]);
+  useEffect(() => {
+    Promise.all([CertificatesApi.list(), EstablishmentsApi.list()])
+      .then(([c, e]) => { setItems(c); setEstablishments(e); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
 
-  function save() {
+  function estName(id: string) {
+    const e = establishments.find((x: any) => x.id === id);
+    return e?.businessName || id;
+  }
+
+  async function save() {
     if (!form.establishmentId || !form.certificateNumber || !form.issuedDate || !form.expiryDate) return;
-    const est = establishments.find((e: any) => e.id === form.establishmentId);
-    const id = crypto.randomUUID();
-    setItems((prev) => [{ id, ...form, establishmentName: est?.businessName || 'Unknown', status: isExpired(form.expiryDate) ? 'Expired' : 'Active' }, ...prev]);
+    const created = await CertificatesApi.create(form);
+    setItems((prev) => [created, ...prev]);
     setShowForm(false);
     setForm({ establishmentId: '', certificateNumber: '', issuedDate: '', expiryDate: '' });
   }
 
-  function updateStatus(id: string, status: string) { setItems((prev) => prev.map((i) => i.id === id ? { ...i, status } : i)); }
+  async function updateStatus(id: string, status: string) {
+    const updated = await CertificatesApi.update(id, { status });
+    setItems((prev) => prev.map((i) => i.id === id ? { ...i, ...updated } : i));
+  }
 
-  function remove(id: string) { if (confirm('Delete this certificate?')) setItems((prev) => prev.filter((i) => i.id !== id)); }
+  async function remove(id: string) {
+    if (confirm('Delete this certificate?')) {
+      await CertificatesApi.delete(id);
+      setItems((prev) => prev.filter((i) => i.id !== id));
+    }
+  }
 
   const filtered = items.filter((r) => {
     if (filter !== 'All' && r.status !== filter) return false;
-    if (search) { const q = search.toLowerCase(); return r.establishmentName?.toLowerCase().includes(q) || r.certificateNumber.toLowerCase().includes(q); }
+    if (search) { const q = search.toLowerCase(); return (estName(r.establishmentId) || '').toLowerCase().includes(q) || r.certificateNumber.toLowerCase().includes(q); }
     return true;
   });
 
   const counts: Record<string, number> = { All: items.length, Active: 0, Expired: 0, Revoked: 0 };
   items.forEach((i) => { if (counts[i.status] !== undefined) counts[i.status]++; });
+
+  if (loading) return <div className="text-sm text-gray-500 p-4">Loading...</div>;
 
   return (
     <div className="space-y-6">
@@ -115,7 +122,7 @@ export default function Certificates() {
               {filtered.map((r) => (
                 <tr key={r.id} className="border-b border-gray-100 hover:bg-gray-50">
                   <td className="px-4 py-2.5 font-mono text-xs text-gray-900 font-semibold">{r.certificateNumber}</td>
-                  <td className="px-4 py-2.5 font-medium text-gray-900">{r.establishmentName}</td>
+                  <td className="px-4 py-2.5 font-medium text-gray-900">{estName(r.establishmentId)}</td>
                   <td className="px-4 py-2.5 text-gray-600">{formatDate(r.issuedDate)}</td>
                   <td className="px-4 py-2.5 text-gray-600">{formatDate(r.expiryDate)}</td>
                   <td className="px-4 py-2.5">

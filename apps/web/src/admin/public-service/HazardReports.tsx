@@ -1,21 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Search, MapPin, AlertTriangle, Clock, Pencil, Trash2, X, Check } from 'lucide-react';
-
-const STORAGE_KEY = 'bfp-hazard-reports';
-const SEED = [
-  { id: 'HAZ-001', type: 'Electrical Hazard', location: 'National Highway, Ipil Heights', barangay: 'Ipil Heights', reporter: 'Anonymous', date: 'Jul 13, 2026', status: 'Under Investigation', priority: 'High' },
-  { id: 'HAZ-002', type: 'Gas Leak Suspected', location: 'Quezon Blvd, Sanito', barangay: 'Sanito', reporter: 'Maria Santos', date: 'Jul 12, 2026', status: 'Resolved', priority: 'Critical' },
-  { id: 'HAZ-003', type: 'Unattended Burning', location: 'Serenity Dr, Bangkerohan', barangay: 'Bangkerohan', reporter: 'Anonymous', date: 'Jul 11, 2026', status: 'Closed', priority: 'Medium' },
-  { id: 'HAZ-004', type: 'Blocked Fire Exit', location: 'Gov. Cerilles St, Poblacion', barangay: 'Poblacion', reporter: 'Pedro Reyes', date: 'Jul 10, 2026', status: 'Resolved', priority: 'Medium' },
-  { id: 'HAZ-005', type: 'Improper LPG Storage', location: 'Cueto St, Upper Ipil', barangay: 'Upper Ipil', reporter: 'Anonymous', date: 'Jul 9, 2026', status: 'New', priority: 'High' },
-];
-
-function loadItems() {
-  try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return SEED;
-}
-
-function makeId() { return `HAZ-${Date.now().toString(36).toUpperCase().slice(-5)}`; }
+import { HazardReportsApi } from '../../lib/api';
 
 const statuses = ['New', 'Under Investigation', 'Resolved', 'Closed'];
 const priorities = ['Critical', 'High', 'Medium', 'Low'];
@@ -31,20 +16,25 @@ const priorityColors: Record<string, string> = {
 };
 
 export default function HazardReports() {
-  const [items, setItems] = useState<any[]>(loadItems);
+  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('All');
   const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
   const [form, setForm] = useState({ type: 'Electrical Hazard', location: '', barangay: 'Poblacion', reporter: '', priority: 'Medium' });
 
-  useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); }, [items]);
+  useEffect(() => {
+    HazardReportsApi.list().then((data) => { setItems(data); setLoading(false); }).catch(() => setLoading(false));
+  }, []);
 
-  function save() {
+  async function save() {
     if (editing) {
-      setItems((prev) => prev.map((i) => i.id === editing.id ? { ...i, ...form } : i));
+      const updated = await HazardReportsApi.update(editing.id, form);
+      setItems((prev) => prev.map((i) => i.id === editing.id ? { ...i, ...updated } : i));
     } else {
-      setItems((prev) => [{ id: makeId(), ...form, date: new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }), status: 'New' }, ...prev]);
+      const created = await HazardReportsApi.create(form);
+      setItems((prev) => [created, ...prev]);
     }
     setShowForm(false); setEditing(null);
     setForm({ type: 'Electrical Hazard', location: '', barangay: 'Poblacion', reporter: '', priority: 'Medium' });
@@ -52,9 +42,17 @@ export default function HazardReports() {
 
   function edit(item: any) { setForm({ type: item.type, location: item.location, barangay: item.barangay, reporter: item.reporter, priority: item.priority }); setEditing(item); setShowForm(true); }
 
-  function remove(id: string) { if (confirm('Delete this hazard report?')) setItems((prev) => prev.filter((i) => i.id !== id)); }
+  async function remove(id: string) {
+    if (confirm('Delete this hazard report?')) {
+      await HazardReportsApi.delete(id);
+      setItems((prev) => prev.filter((i) => i.id !== id));
+    }
+  }
 
-  function updateStatus(id: string, status: string) { setItems((prev) => prev.map((i) => i.id === id ? { ...i, status } : i)); }
+  async function updateStatus(id: string, status: string) {
+    const updated = await HazardReportsApi.update(id, { status });
+    setItems((prev) => prev.map((i) => i.id === id ? { ...i, ...updated } : i));
+  }
 
   const filtered = items.filter((h) => {
     if (filter !== 'All' && h.status !== filter) return false;
@@ -65,6 +63,8 @@ export default function HazardReports() {
   function getStyle(p: string) {
     return p === 'Critical' ? 'bg-red-50 text-red-600' : p === 'High' ? 'bg-orange-50 text-orange-600' : 'bg-yellow-50 text-yellow-600';
   }
+
+  if (loading) return <div className="text-sm text-gray-500 p-4">Loading...</div>;
 
   return (
     <div className="space-y-6">
@@ -129,7 +129,7 @@ export default function HazardReports() {
                 </div>
                 <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
                   <span className="flex items-center gap-1"><MapPin size={11} /> {h.barangay}</span>
-                  <span className="flex items-center gap-1"><Clock size={11} /> {h.date}</span>
+                  <span className="flex items-center gap-1"><Clock size={11} /> {h.date ? new Date(h.date).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : '—'}</span>
                   <span>{h.reporter}</span>
                 </div>
               </div>

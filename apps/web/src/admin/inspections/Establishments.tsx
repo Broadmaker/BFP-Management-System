@@ -1,19 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Search, Plus, Pencil, Trash2, X, Check } from 'lucide-react';
-
-const STORAGE_KEY = 'bfp-establishments';
-const SEED = [
-  { id: '1', businessName: 'Ipil Grocery Mart', ownerName: 'Carlos Green', ownerContact: '0917-111-1111', address: 'National Highway', barangay: 'Poblacion', occupancyType: 'Commercial', classification: 'Retail', complianceStatus: 'Compliant' },
-  { id: '2', businessName: 'Riverside Eatery', ownerName: 'Maria Rivera', ownerContact: '0917-222-2222', address: 'Quezon Blvd', barangay: 'Ipil Heights', occupancyType: 'Commercial', classification: 'Food Service', complianceStatus: 'Non-Compliant' },
-  { id: '3', businessName: 'Ipil Heights Apartments', ownerName: 'Jose Santos', ownerContact: '0917-333-3333', address: 'Serenity Dr', barangay: 'Bangkerohan', occupancyType: 'Residential', classification: 'Multi-family', complianceStatus: 'Compliant' },
-  { id: '4', businessName: 'Sibugay Hardware', ownerName: 'Ana Reyes', ownerContact: '0917-444-4444', address: 'Cueto St', barangay: 'Upper Ipil', occupancyType: 'Commercial', classification: 'Hardware', complianceStatus: 'Pending' },
-  { id: '5', businessName: 'Don Basilio School Inc.', ownerName: 'Luisa Tan', ownerContact: '0917-555-5555', address: 'Gov. Cerilles St', barangay: 'Don Basilio', occupancyType: 'Institutional', classification: 'Educational', complianceStatus: 'Compliant' },
-];
-
-function loadItems() {
-  try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return SEED;
-}
+import { EstablishmentsApi } from '../../lib/api';
 
 const statusColors: Record<string, string> = {
   Compliant: 'bg-green-100 text-green-700',
@@ -26,22 +13,26 @@ const statuses = ['Compliant', 'Non-Compliant', 'Pending', 'Under Review'];
 const occupancyTypes = ['Commercial', 'Residential', 'Institutional', 'Industrial', 'Open Area', 'Mixed-Use'];
 
 export default function Establishments() {
-  const [items, setItems] = useState<any[]>(loadItems);
+  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('All');
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
   const [form, setForm] = useState({ businessName: '', ownerName: '', ownerContact: '', address: '', barangay: '', occupancyType: 'Commercial', classification: '' });
 
-  useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); }, [items]);
+  useEffect(() => {
+    EstablishmentsApi.list().then((data) => { setItems(data); setLoading(false); }).catch(() => setLoading(false));
+  }, []);
 
-  function save() {
+  async function save() {
     if (!form.businessName || !form.ownerName || !form.address || !form.barangay || !form.occupancyType) return;
     if (editing) {
-      setItems((prev) => prev.map((i) => i.id === editing.id ? { ...i, ...form } : i));
+      const updated = await EstablishmentsApi.update(editing.id, form);
+      setItems((prev) => prev.map((i) => i.id === editing.id ? { ...i, ...updated } : i));
     } else {
-      const id = crypto.randomUUID();
-      setItems((prev) => [{ id, ...form, complianceStatus: 'Pending' }, ...prev]);
+      const created = await EstablishmentsApi.create(form);
+      setItems((prev) => [created, ...prev]);
     }
     setShowForm(false); setEditing(null);
     setForm({ businessName: '', ownerName: '', ownerContact: '', address: '', barangay: '', occupancyType: 'Commercial', classification: '' });
@@ -52,9 +43,17 @@ export default function Establishments() {
     setEditing(item); setShowForm(true);
   }
 
-  function remove(id: string) { if (confirm('Delete this establishment?')) setItems((prev) => prev.filter((i) => i.id !== id)); }
+  async function remove(id: string) {
+    if (confirm('Delete this establishment?')) {
+      await EstablishmentsApi.delete(id);
+      setItems((prev) => prev.filter((i) => i.id !== id));
+    }
+  }
 
-  function updateStatus(id: string, status: string) { setItems((prev) => prev.map((i) => i.id === id ? { ...i, complianceStatus: status } : i)); }
+  async function updateStatus(id: string, status: string) {
+    const updated = await EstablishmentsApi.update(id, { complianceStatus: status });
+    setItems((prev) => prev.map((i) => i.id === id ? { ...i, ...updated } : i));
+  }
 
   const filtered = items.filter((r) => {
     if (filter !== 'All' && r.complianceStatus !== filter) return false;
@@ -64,6 +63,8 @@ export default function Establishments() {
 
   const counts: Record<string, number> = { All: items.length };
   statuses.forEach((s) => { counts[s] = items.filter((i) => i.complianceStatus === s).length; });
+
+  if (loading) return <div className="text-sm text-gray-500 p-4">Loading...</div>;
 
   return (
     <div className="space-y-6">

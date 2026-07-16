@@ -1,21 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Search, Plus, Calendar, MapPin, Clock, Pencil, Trash2, X, Check } from 'lucide-react';
-
-const STORAGE_KEY = 'bfp-appointments';
-const SEED = [
-  { id: 'APP-001', name: 'Juan Dela Cruz', business: 'Sari-Sari Store', type: 'Initial Inspection', date: 'Jul 20, 2026', time: '9:00 AM', address: 'National Highway, Poblacion', status: 'Confirmed' },
-  { id: 'APP-002', name: 'Maria Santos', business: 'Riverside Eatery', type: 'Reinspection', date: 'Jul 21, 2026', time: '10:30 AM', address: 'Quezon Blvd, Ipil Heights', status: 'Pending' },
-  { id: 'APP-003', name: 'Pedro Reyes', business: '—', type: 'Initial Inspection', date: 'Jul 22, 2026', time: '1:00 PM', address: 'Gov. Cerilles St, Poblacion', status: 'Confirmed' },
-  { id: 'APP-004', name: 'Ana Gonzales', business: '—', type: 'Initial Inspection', date: 'Jul 18, 2026', time: '8:30 AM', address: 'Serenity Dr, Bangkerohan', status: 'Completed' },
-  { id: 'APP-005', name: 'Carlos Lim', business: 'Sibugay Hardware', type: 'Reinspection', date: 'Jul 25, 2026', time: '11:00 AM', address: 'Cueto St, Upper Ipil', status: 'Pending' },
-];
-
-function loadItems() {
-  try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return SEED;
-}
-
-function makeId() { return `APP-${Date.now().toString(36).toUpperCase().slice(-5)}`; }
+import { AppointmentsApi } from '../../lib/api';
 
 const statuses = ['Pending', 'Confirmed', 'Completed', 'Cancelled'];
 const statusColors: Record<string, string> = {
@@ -24,21 +9,26 @@ const statusColors: Record<string, string> = {
 };
 
 export default function Appointments() {
-  const [items, setItems] = useState<any[]>(loadItems);
+  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('All');
   const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
   const [form, setForm] = useState({ name: '', business: '', type: 'Initial Inspection', date: '', time: '', address: '' });
 
-  useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); }, [items]);
+  useEffect(() => {
+    AppointmentsApi.list().then((data) => { setItems(data); setLoading(false); }).catch(() => setLoading(false));
+  }, []);
 
-  function save() {
+  async function save() {
     const data = { ...form, business: form.business || '—' };
     if (editing) {
-      setItems((prev) => prev.map((i) => i.id === editing.id ? { ...i, ...data } : i));
+      const updated = await AppointmentsApi.update(editing.id, data);
+      setItems((prev) => prev.map((i) => i.id === editing.id ? { ...i, ...updated } : i));
     } else {
-      setItems((prev) => [{ id: makeId(), ...data, status: 'Pending' }, ...prev]);
+      const created = await AppointmentsApi.create(data);
+      setItems((prev) => [created, ...prev]);
     }
     setShowForm(false); setEditing(null);
     setForm({ name: '', business: '', type: 'Initial Inspection', date: '', time: '', address: '' });
@@ -46,15 +36,25 @@ export default function Appointments() {
 
   function edit(item: any) { setForm({ name: item.name, business: item.business === '—' ? '' : item.business, type: item.type, date: item.date, time: item.time, address: item.address }); setEditing(item); setShowForm(true); }
 
-  function remove(id: string) { if (confirm('Cancel this appointment?')) setItems((prev) => prev.filter((i) => i.id !== id)); }
+  async function remove(id: string) {
+    if (confirm('Cancel this appointment?')) {
+      await AppointmentsApi.delete(id);
+      setItems((prev) => prev.filter((i) => i.id !== id));
+    }
+  }
 
-  function updateStatus(id: string, status: string) { setItems((prev) => prev.map((i) => i.id === id ? { ...i, status } : i)); }
+  async function updateStatus(id: string, status: string) {
+    const updated = await AppointmentsApi.update(id, { status });
+    setItems((prev) => prev.map((i) => i.id === id ? { ...i, ...updated } : i));
+  }
 
   const filtered = items.filter((a) => {
     if (filter !== 'All' && a.status !== filter) return false;
-    if (search) { const q = search.toLowerCase(); return a.name.toLowerCase().includes(q) || a.business.toLowerCase().includes(q) || a.id.toLowerCase().includes(q); }
+    if (search) { const q = search.toLowerCase(); return a.name.toLowerCase().includes(q) || (a.business || '').toLowerCase().includes(q) || a.id.toLowerCase().includes(q); }
     return true;
   });
+
+  if (loading) return <div className="text-sm text-gray-500 p-4">Loading...</div>;
 
   return (
     <div className="space-y-6">
@@ -85,8 +85,8 @@ export default function Appointments() {
           {filtered.map((a) => (
             <div key={a.id} className="p-4 hover:bg-gray-50 flex items-start gap-4">
               <div className="w-12 h-12 rounded-lg bg-red-50 text-red-600 flex flex-col items-center justify-center text-xs font-bold flex-shrink-0">
-                <span className="text-[10px] font-medium">{a.date.split(' ')[0]}</span>
-                <span>{a.date.split(' ')[1]?.replace(',', '')}</span>
+                <span className="text-[10px] font-medium">{a.date ? new Date(a.date).toLocaleDateString('en-US', { month: 'short' }) : ''}</span>
+                <span>{a.date ? new Date(a.date).getDate() : ''}</span>
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-start justify-between">
@@ -140,14 +140,21 @@ export default function Appointments() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">Date</label>
-                  <input type="date" value={form.date} onChange={(e) => {
+                  <input type="date" value={form.date ? new Date(form.date).toISOString().split('T')[0] : ''} onChange={(e) => {
                     const d = new Date(e.target.value + 'T12:00:00');
                     setForm({ ...form, date: d.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) });
                   }} className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500" />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">Time</label>
-                  <input type="time" value={form.time} onChange={(e) => {
+                  <input type="time" value={form.time ? (() => {
+                    const m = form.time.match(/(\d+):(\d+)\s*(AM|PM)/);
+                    if (!m) return '';
+                    let h = +m[1];
+                    if (m[3] === 'PM' && h !== 12) h += 12;
+                    if (m[3] === 'AM' && h === 12) h = 0;
+                    return `${String(h).padStart(2, '0')}:${m[2]}`;
+                  })() : ''} onChange={(e) => {
                     const [h, m] = e.target.value.split(':');
                     const ampm = +h >= 12 ? 'PM' : 'AM';
                     const h12 = +h % 12 || 12;

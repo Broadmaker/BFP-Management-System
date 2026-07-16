@@ -1,19 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Search, Plus, Pencil, Trash2, X, Check } from 'lucide-react';
-
-const STORAGE_KEY = 'bfp-equipment';
-const SEED = [
-  { id: '1', name: 'SCBA Set', category: 'Breathing Apparatus', serialNumber: 'SCBA-001', status: 'Operational', location: 'Ipil Station - Bay 1', purchaseDate: 'Jun 1, 2024', nextMaintenance: 'Aug 1, 2026' },
-  { id: '2', name: 'Thermal Imaging Camera', category: 'Detection', serialNumber: 'TIC-001', status: 'Operational', location: 'Ipil Station - Bay 2', purchaseDate: 'Sep 15, 2024', nextMaintenance: 'Sep 15, 2026' },
-  { id: '3', name: 'Portable Pump', category: 'Water Supply', serialNumber: 'PUMP-003', status: 'Under Maintenance', location: 'Workshop', purchaseDate: 'Nov 1, 2023', nextMaintenance: 'Jul 15, 2026' },
-  { id: '4', name: 'Extrication Tools (Jaws of Life)', category: 'Rescue', serialNumber: 'EXT-001', status: 'Operational', location: 'Ipil Station - Bay 3', purchaseDate: 'Jan 20, 2025', nextMaintenance: 'Oct 20, 2026' },
-  { id: '5', name: 'Generator 50kW', category: 'Power Supply', serialNumber: 'GEN-002', status: 'Operational', location: 'Ipil Station - Yard', purchaseDate: 'Apr 1, 2024', nextMaintenance: 'Aug 15, 2026' },
-];
-
-function loadItems() {
-  try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return SEED;
-}
+import { EquipmentApi } from '../../lib/api';
 
 const statusColors: Record<string, string> = {
   Operational: 'bg-green-100 text-green-700',
@@ -26,22 +13,26 @@ const categories = ['Breathing Apparatus', 'Detection', 'Water Supply', 'Rescue'
 const statuses = ['Operational', 'Under Maintenance', 'Out of Service', 'Decommissioned'];
 
 export default function EquipmentList() {
-  const [items, setItems] = useState<any[]>(loadItems);
+  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('All');
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
   const [form, setForm] = useState({ name: '', category: '', serialNumber: '', status: 'Operational', location: '', nextMaintenance: '' });
 
-  useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); }, [items]);
+  useEffect(() => {
+    EquipmentApi.list().then((data) => { setItems(data); setLoading(false); }).catch(() => setLoading(false));
+  }, []);
 
-  function save() {
+  async function save() {
     if (!form.name || !form.category) return;
     if (editing) {
-      setItems((prev) => prev.map((i) => i.id === editing.id ? { ...i, ...form } : i));
+      const updated = await EquipmentApi.update(editing.id, form);
+      setItems((prev) => prev.map((i) => i.id === editing.id ? { ...i, ...updated } : i));
     } else {
-      const id = crypto.randomUUID();
-      setItems((prev) => [{ id, ...form, purchaseDate: new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) }, ...prev]);
+      const created = await EquipmentApi.create(form);
+      setItems((prev) => [created, ...prev]);
     }
     setShowForm(false); setEditing(null);
     setForm({ name: '', category: '', serialNumber: '', status: 'Operational', location: '', nextMaintenance: '' });
@@ -52,7 +43,12 @@ export default function EquipmentList() {
     setEditing(item); setShowForm(true);
   }
 
-  function remove(id: string) { if (confirm('Delete this equipment?')) setItems((prev) => prev.filter((i) => i.id !== id)); }
+  async function remove(id: string) {
+    if (confirm('Delete this equipment?')) {
+      await EquipmentApi.delete(id);
+      setItems((prev) => prev.filter((i) => i.id !== id));
+    }
+  }
 
   const filtered = items.filter((r) => {
     if (filter !== 'All' && r.status !== filter) return false;
@@ -62,6 +58,8 @@ export default function EquipmentList() {
 
   const counts: Record<string, number> = { All: items.length };
   statuses.forEach((s) => { counts[s] = items.filter((i) => i.status === s).length; });
+
+  if (loading) return <div className="text-sm text-gray-500 p-4">Loading...</div>;
 
   return (
     <div className="space-y-6">

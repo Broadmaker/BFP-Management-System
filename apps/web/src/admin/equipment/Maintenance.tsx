@@ -1,59 +1,46 @@
 import { useState, useEffect } from 'react';
 import { Search, Plus, X, Check } from 'lucide-react';
-
-const STORAGE_KEY = 'bfp-maintenance';
-const EQUIP_KEY = 'bfp-equipment';
-const VEHICLE_KEY = 'bfp-vehicles';
-
-function loadItems() {
-  try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return [];
-}
-
-function loadEquipment() {
-  try { const raw = localStorage.getItem(EQUIP_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return [];
-}
-
-function loadVehicles() {
-  try { const raw = localStorage.getItem(VEHICLE_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return [];
-}
+import { MaintenanceApi, EquipmentApi, VehiclesApi } from '../../lib/api';
 
 const typeColors: Record<string, string> = {
   Preventive: 'bg-blue-100 text-blue-700',
   Repair: 'bg-orange-100 text-orange-700',
 };
 
-const todayStr = () => new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' });
-
 export default function Maintenance() {
-  const [items, setItems] = useState<any[]>(loadItems);
-  const [equipment] = useState<any[]>(loadEquipment);
-  const [vehicles] = useState<any[]>(loadVehicles);
+  const [items, setItems] = useState<any[]>([]);
+  const [equipment, setEquipment] = useState<any[]>([]);
+  const [vehicles, setVehicles] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('All');
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ assetType: 'equipment', assetId: '', type: 'Preventive', description: '', cost: '', nextScheduledDate: '' });
 
-  useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); }, [items]);
+  useEffect(() => {
+    Promise.all([MaintenanceApi.list(), EquipmentApi.list(), VehiclesApi.list()])
+      .then(([r, e, v]) => { setItems(r); setEquipment(e); setVehicles(v); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
 
-  function save() {
+  async function save() {
     if (!form.assetId || !form.type) return;
-    const assetName = form.assetType === 'equipment'
-      ? equipment.find((e: any) => e.id === form.assetId)?.name || 'Unknown'
-      : vehicles.find((v: any) => v.id === form.assetId)?.name || 'Unknown';
-    const id = crypto.randomUUID();
-    setItems((prev) => [{ id, ...form, assetName, date: todayStr() }, ...prev]);
+    const created = await MaintenanceApi.create(form);
+    setItems((prev) => [created, ...prev]);
     setShowForm(false);
     setForm({ assetType: 'equipment', assetId: '', type: 'Preventive', description: '', cost: '', nextScheduledDate: '' });
   }
 
-  function remove(id: string) { if (confirm('Delete this maintenance record?')) setItems((prev) => prev.filter((i) => i.id !== id)); }
+  async function remove(id: string) {
+    if (confirm('Delete this maintenance record?')) {
+      await MaintenanceApi.delete(id);
+      setItems((prev) => prev.filter((i) => i.id !== id));
+    }
+  }
 
   const filtered = items.filter((r) => {
     if (filter !== 'All' && r.type !== filter) return false;
-    if (search) { const q = search.toLowerCase(); return r.assetName?.toLowerCase().includes(q) || r.description?.toLowerCase().includes(q); }
+    if (search) { const q = search.toLowerCase(); return (r.description || '').toLowerCase().includes(q) || r.assetType?.toLowerCase().includes(q); }
     return true;
   });
 
@@ -61,6 +48,12 @@ export default function Maintenance() {
   items.forEach((i) => { if (counts[i.type] !== undefined) counts[i.type]++; });
 
   const assets = form.assetType === 'equipment' ? equipment : vehicles;
+
+  function assetName(id: string) {
+    return equipment.find((e: any) => e.id === id)?.name || vehicles.find((v: any) => v.id === id)?.name || id;
+  }
+
+  if (loading) return <div className="text-sm text-gray-500 p-4">Loading...</div>;
 
   return (
     <div className="space-y-6">
@@ -115,8 +108,8 @@ export default function Maintenance() {
             <tbody>
               {filtered.map((r) => (
                 <tr key={r.id} className="border-b border-gray-100 hover:bg-gray-50">
-                  <td className="px-4 py-2.5 text-gray-600">{r.date}</td>
-                  <td className="px-4 py-2.5 font-medium text-gray-900">{r.assetName}</td>
+                  <td className="px-4 py-2.5 text-gray-600">{r.performedDate || r.date || '—'}</td>
+                  <td className="px-4 py-2.5 font-medium text-gray-900">{assetName(r.assetId)}</td>
                   <td className="px-4 py-2.5">
                     <span className={`text-[11px] font-medium px-1.5 py-0.5 rounded-full ${typeColors[r.type]}`}>{r.type}</span>
                   </td>
@@ -158,7 +151,7 @@ export default function Maintenance() {
                 <select value={form.assetId} onChange={(e) => setForm({ ...form, assetId: e.target.value })}
                   className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500">
                   <option value="">Select {form.assetType}...</option>
-                  {assets.map((a: any) => <option key={a.id} value={a.id}>{a.name} ({a.id})</option>)}
+                  {assets.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
                 </select>
               </div>
               <div>
